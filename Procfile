@@ -1,0 +1,2 @@
+worker: python Slotenbot.py
+
