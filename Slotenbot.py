@@ -148,18 +148,16 @@ logger = logging.getLogger(__name__)
 # ==================== VÉRIFICATIONS DE SÉCURITÉ ====================
 
 def is_authorized_user(update: Update) -> bool:
-    """Vérifie si l'utilisateur est autorisé"""
-    user_id = update.effective_user.id
-    return user_id in USER_IDS
+    """Vérifie si l'utilisateur est autorisé - DÉSACTIVÉ : tous autorisés"""
+    return True  # Tous les utilisateurs peuvent utiliser le bot
 
 def is_authorized_group(update: Update) -> bool:
-    """Vérifie si le message provient du groupe autorisé"""
-    chat_id = update.effective_chat.id
-    return chat_id == GROUP_ID
+    """Vérifie si le message provient du groupe autorisé - DÉSACTIVÉ : tous les groupes autorisés"""
+    return True  # Tous les groupes sont autorisés
 
 def check_authorization(update: Update) -> bool:
-    """Vérifie utilisateur ET groupe"""
-    return is_authorized_user(update) and is_authorized_group(update)
+    """Vérifie l'autorisation - DÉSACTIVÉ : tout le monde peut utiliser le bot"""
+    return True  # Pas de restriction
 
 # ==================== FONCTIONS UTILITAIRES ====================
 
@@ -370,6 +368,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data == "modifier_retour":
         message_id = query.message.message_id
+        chat_id = query.message.chat_id
         
         # Récupérer les données depuis la base de données
         retour_db = get_retour_by_message_id(message_id)
@@ -387,6 +386,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
         
         context.user_data['message_id_editing'] = message_id
+        context.user_data['chat_id_editing'] = chat_id
         context.user_data['retour_data'] = retour_data
         
         await query.edit_message_reply_markup(reply_markup=get_modifier_keyboard())
@@ -394,7 +394,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data == "supprimer_retour":
         message_id = query.message.message_id
+        chat_id = query.message.chat_id
         context.user_data['message_id_suppression'] = message_id
+        context.user_data['chat_id_suppression'] = chat_id
         await query.edit_message_text(
             "⚠️ Confirmer la suppression ?",
             reply_markup=get_confirmation_keyboard()
@@ -418,13 +420,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data == "confirmer_suppression":
         message_id = context.user_data.get('message_id_suppression')
-        if message_id:
+        chat_id = context.user_data.get('chat_id_suppression')
+        if message_id and chat_id:
             try:
                 # Supprimer de la base de données
                 delete_retour_from_db(message_id)
                 # Supprimer le message dans Telegram
                 await context.bot.delete_message(
-                    chat_id=GROUP_ID,
+                    chat_id=chat_id,
                     message_id=message_id
                 )
                 await query.edit_message_text("✅ Retour supprimé.", reply_markup=get_menu_keyboard())
@@ -523,8 +526,10 @@ async def collect_materiel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
     
     try:
+        # Utiliser le chat_id du message actuel (n'importe quel groupe)
+        chat_id = update.message.chat_id
         sent_message = await context.bot.send_message(
-            chat_id=GROUP_ID,
+            chat_id=chat_id,
             text=message_text,
             reply_markup=get_retour_keyboard()
         )
@@ -561,9 +566,10 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
     new_value = update.message.text.strip()
     modif_type = context.user_data.get('modif_type')
     message_id = context.user_data.get('message_id_editing')
+    chat_id = context.user_data.get('chat_id_editing')
     retour_data = context.user_data.get('retour_data', {})
     
-    if not message_id or not retour_data:
+    if not message_id or not chat_id or not retour_data:
         await update.message.reply_text("❌ Erreur: données de modification introuvables.", reply_markup=get_menu_keyboard())
         context.user_data.clear()
         return ConversationHandler.END
@@ -606,9 +612,9 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
     new_text = format_retour_message(nom, adresse, description, materiel)
     
     try:
-        # Éditer le message dans le groupe
+        # Éditer le message dans le groupe (utiliser le chat_id stocké)
         await context.bot.edit_message_text(
-            chat_id=GROUP_ID,
+            chat_id=chat_id,
             message_id=message_id,
             text=new_text,
             reply_markup=get_retour_keyboard()
