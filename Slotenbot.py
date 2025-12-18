@@ -345,8 +345,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     context.user_data.clear()
     
-    message = "🔧 Gestion des retours d'intervention\n\n"
-    message += "Choisissez une action :"
+    message = "🔧 Afwerkingen beheer\n\n"
+    message += "Kies een actie :"
     
     await update.message.reply_text(
         message,
@@ -373,7 +373,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['status_message_id'] = status_msg.message_id
         context.user_data['status_chat_id'] = status_msg.chat_id
         await query.edit_message_reply_markup(reply_markup=None)  # Retirer les boutons temporairement
-        await update_status_message(context, "👤 Nom du client :")
+        await update_status_message(context, "👤 Naam van klant :")
         return COLLECTING_NOM_CLIENT
     
     elif data == "modifier_retour":
