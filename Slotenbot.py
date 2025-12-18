@@ -210,7 +210,7 @@ def get_retour_keyboard() -> InlineKeyboardMarkup:
 def get_menu_keyboard() -> InlineKeyboardMarkup:
     """Retourne le clavier du menu principal"""
     keyboard = [
-        [InlineKeyboardButton("➕ Ajouter un retour", callback_data="ajouter_retour")],
+        [InlineKeyboardButton("➕ Afwerking toevoegen", callback_data="ajouter_retour")],
         [InlineKeyboardButton("📋 Voir les retours", callback_data="voir_retours")]
     ]
     return InlineKeyboardMarkup(keyboard)
