@@ -173,11 +173,11 @@ def check_authorization(update: Update) -> bool:
 def format_retour_message(nom: str, adresse: str, description: str, 
                          materiel: str) -> str:
     """Formate le message de retour d'intervention"""
-    message = "🔁 RETOUR INTERVENTION\n\n"
-    message += f"Client : {nom}\n"
-    message += f"Adresse : {adresse}\n"
-    message += f"À faire : {description}\n"
-    message += f"Matériel : {materiel}"
+    message = "🔁 AFWERKING\n\n"
+    message += f"Klant : {nom}\n"
+    message += f"Adres : {adresse}\n"
+    message += f"Te doen : {description}\n"
+    message += f"Materiaal : {materiel}"
     return message
 
 def parse_retour_message(message_text: str) -> Dict[str, str]:
@@ -187,14 +187,14 @@ def parse_retour_message(message_text: str) -> Dict[str, str]:
         lines = message_text.split('\n')
         for line in lines:
             line = line.strip()
-            if line.startswith('Client :'):
-                data['nom'] = line.replace('Client :', '').strip()
-            elif line.startswith('Adresse :'):
-                data['adresse'] = line.replace('Adresse :', '').strip()
-            elif line.startswith('À faire :'):
-                data['description'] = line.replace('À faire :', '').strip()
-            elif line.startswith('Matériel :'):
-                data['materiel'] = line.replace('Matériel :', '').strip()
+            if line.startswith('Klant :'):
+                data['nom'] = line.replace('Klant :', '').strip()
+            elif line.startswith('Adres :'):
+                data['adresse'] = line.replace('Adres :', '').strip()
+            elif line.startswith('Te doen :'):
+                data['description'] = line.replace('Te doen :', '').strip()
+            elif line.startswith('Materiaal :'):
+                data['materiel'] = line.replace('Materiaal :', '').strip()
     except Exception as e:
         logger.error(f"Erreur parsing message: {e}")
     return data
@@ -202,8 +202,8 @@ def parse_retour_message(message_text: str) -> Dict[str, str]:
 def get_retour_keyboard() -> InlineKeyboardMarkup:
     """Retourne le clavier pour un retour (modifier/supprimer)"""
     keyboard = [
-        [InlineKeyboardButton("✏️ Modifier", callback_data="modifier_retour")],
-        [InlineKeyboardButton("🗑 Supprimer", callback_data="supprimer_retour")]
+        [InlineKeyboardButton("✏️ Bewerken", callback_data="modifier_retour")],
+        [InlineKeyboardButton("🗑 Verwijderen", callback_data="supprimer_retour")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -218,9 +218,9 @@ def get_menu_keyboard() -> InlineKeyboardMarkup:
 def get_modifier_keyboard() -> InlineKeyboardMarkup:
     """Retourne le clavier pour modifier un retour"""
     keyboard = [
-        [InlineKeyboardButton("Modifier description", callback_data="modif_description")],
-        [InlineKeyboardButton("Modifier matériel", callback_data="modif_materiel")],
-        [InlineKeyboardButton("❌ Annuler", callback_data="annuler_modif")]
+        [InlineKeyboardButton("Beschrijving bewerken", callback_data="modif_description")],
+        [InlineKeyboardButton("Materiaal bewerken", callback_data="modif_materiel")],
+        [InlineKeyboardButton("❌ Annuleren", callback_data="annuler_modif")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -228,8 +228,8 @@ def get_confirmation_keyboard() -> InlineKeyboardMarkup:
     """Retourne le clavier de confirmation de suppression"""
     keyboard = [
         [
-            InlineKeyboardButton("✅ Confirmer", callback_data="confirmer_suppression"),
-            InlineKeyboardButton("❌ Annuler", callback_data="annuler_suppression")
+            InlineKeyboardButton("✅ Bevestigen", callback_data="confirmer_suppression"),
+            InlineKeyboardButton("❌ Annuleren", callback_data="annuler_suppression")
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -245,27 +245,27 @@ async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_ques
     if not message_id or not chat_id:
         return
     
-    status_text = "📝 **Ajout d'un retour**\n\n"
+    status_text = "📝 **Afwerking toevoegen**\n\n"
     
     if retour.get('nom'):
-        status_text += f"👤 Nom du client : {retour['nom']}\n"
+        status_text += f"👤 Naam van klant : {retour['nom']}\n"
     else:
-        status_text += "👤 Nom du client : _En attente..._\n"
+        status_text += "👤 Naam van klant : _In afwachting..._\n"
     
     if retour.get('adresse'):
-        status_text += f"📍 Adresse : {retour['adresse']}\n"
+        status_text += f"📍 Adres : {retour['adresse']}\n"
     elif 'nom' in retour:
-        status_text += "📍 Adresse : _En attente..._\n"
+        status_text += "📍 Adres : _In afwachting..._\n"
     
     if retour.get('description'):
-        status_text += f"🔧 Description : {retour['description']}\n"
+        status_text += f"🔧 Beschrijving : {retour['description']}\n"
     elif 'adresse' in retour:
-        status_text += "🔧 Description : _En attente..._\n"
+        status_text += "🔧 Beschrijving : _In afwachting..._\n"
     
     if retour.get('materiel'):
-        status_text += f"📦 Matériel : {retour['materiel']}\n"
+        status_text += f"📦 Materiaal : {retour['materiel']}\n"
     elif 'description' in retour:
-        status_text += "📦 Matériel : _En attente..._\n"
+        status_text += "📦 Materiaal : _In afwachting..._\n"
     
     status_text += f"\n💬 {current_question}"
     
@@ -292,8 +292,8 @@ async def voir_retours_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     retours = get_all_retours(chat_id)
     
     if not retours:
-        message = "📋 **Liste des retours**\n\n"
-        message += "Aucun retour d'intervention enregistré pour le moment."
+        message = "📋 **Lijst van afwerkingen**\n\n"
+        message += "Geen afwerkingen geregistreerd op dit moment."
         try:
             await query.edit_message_text(message, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
         except Exception as e:
@@ -302,7 +302,7 @@ async def voir_retours_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     
     # Formater la liste des retours
-    message = "📋 **Liste des retours d'intervention**\n\n"
+    message = "📋 **Lijst van afwerkingen**\n\n"
     
     for idx, retour in enumerate(retours, 1):
         # retour est un tuple: (id, message_id, chat_id, nom_client, adresse, description, materiel, date, date_creation)
@@ -311,12 +311,12 @@ async def voir_retours_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         message += f"🔧 {retour[5][:50]}{'...' if len(retour[5]) > 50 else ''}\n"
         message += f"📦 {retour[6]}\n\n"
     
-    message += f"_Total: {len(retours)} retour(s)_"
+    message += f"_Totaal: {len(retours)} afwerking(en)_"
     
     # Si le message est trop long, le diviser en plusieurs messages
     if len(message) > 4000:  # Limite Telegram ~4096 caractères
         # Envoyer le premier message avec les premiers retours
-        first_part = "📋 **Liste des retours d'intervention**\n\n"
+        first_part = "📋 **Lijst van afwerkingen**\n\n"
         remaining_chars = 4000 - len(first_part) - 100  # Marge de sécurité
         
         current_msg = first_part
@@ -408,23 +408,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['message_id_suppression'] = message_id
         context.user_data['chat_id_suppression'] = chat_id
         await query.edit_message_text(
-            "⚠️ Confirmer la suppression ?",
+            "⚠️ Bevestig verwijdering?",
             reply_markup=get_confirmation_keyboard()
         )
         return SELECTING_ACTION
     
     elif data == "modif_description":
         context.user_data['modif_type'] = 'description'
-        await query.edit_message_text("✏️ Nouvelle description :")
+        await query.edit_message_text("✏️ Nieuwe beschrijving :")
         return MODIFYING_FIELD
     
     elif data == "modif_materiel":
         context.user_data['modif_type'] = 'materiel'
-        await query.edit_message_text("✏️ Nouveau matériel :")
+        await query.edit_message_text("✏️ Nieuw materiaal :")
         return MODIFYING_FIELD
     
     elif data == "annuler_modif":
-        await query.edit_message_text("❌ Modification annulée.", reply_markup=get_menu_keyboard())
+        await query.edit_message_text("❌ Bewerking geannuleerd.", reply_markup=get_menu_keyboard())
         context.user_data.clear()
         return ConversationHandler.END
     
@@ -440,15 +440,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chat_id=chat_id,
                     message_id=message_id
                 )
-                await query.edit_message_text("✅ Retour supprimé.", reply_markup=get_menu_keyboard())
+                await query.edit_message_text("✅ Afwerking verwijderd.", reply_markup=get_menu_keyboard())
             except Exception as e:
                 logger.error(f"Erreur suppression message: {e}")
-                await query.edit_message_text("❌ Erreur lors de la suppression.", reply_markup=get_menu_keyboard())
+                await query.edit_message_text("❌ Fout bij het verwijderen.", reply_markup=get_menu_keyboard())
         context.user_data.clear()
         return ConversationHandler.END
     
     elif data == "annuler_suppression":
-        await query.edit_message_text("❌ Suppression annulée.", reply_markup=get_menu_keyboard())
+        await query.edit_message_text("❌ Verwijdering geannuleerd.", reply_markup=get_menu_keyboard())
         context.user_data.clear()
         return ConversationHandler.END
     
@@ -469,7 +469,7 @@ async def collect_nom_client(update: Update, context: ContextTypes.DEFAULT_TYPE)
         pass
     
     # Mettre à jour le message de statut
-    await update_status_message(context, "📍 Adresse :")
+    await update_status_message(context, "📍 Adres :")
     return COLLECTING_ADRESSE
 
 async def collect_adresse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -485,7 +485,7 @@ async def collect_adresse(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except Exception:
         pass
     
-    await update_status_message(context, "🔧 Description du travail à faire :")
+    await update_status_message(context, "🔧 Beschrijving van het werk te doen :")
     return COLLECTING_DESCRIPTION
 
 async def collect_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -501,7 +501,7 @@ async def collect_description(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception:
         pass
     
-    await update_status_message(context, "📦 Matériel à apporter :")
+    await update_status_message(context, "📦 Materiaal mee te nemen :")
     return COLLECTING_MATERIEL
 
 async def collect_materiel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -555,14 +555,14 @@ async def collect_materiel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         await context.bot.send_message(
             chat_id=update.message.chat_id,
-            text="✅ Retour ajouté dans le groupe.",
+            text="✅ Afwerking toegevoegd aan de groep.",
             reply_markup=get_menu_keyboard()
         )
     except Exception as e:
         logger.error(f"Erreur envoi message: {e}")
         await context.bot.send_message(
             chat_id=update.message.chat_id,
-            text="❌ Erreur lors de l'ajout du retour.",
+            text="❌ Fout bij het toevoegen van de afwerking.",
             reply_markup=get_menu_keyboard()
         )
     
@@ -581,7 +581,7 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
     retour_data = context.user_data.get('retour_data', {})
     
     if not message_id or not chat_id or not retour_data:
-        await update.message.reply_text("❌ Erreur: données de modification introuvables.", reply_markup=get_menu_keyboard())
+        await update.message.reply_text("❌ Fout: bewerkingsgegevens niet gevonden.", reply_markup=get_menu_keyboard())
         context.user_data.clear()
         return ConversationHandler.END
     
@@ -593,7 +593,7 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     db_field = field_mapping.get(modif_type)
     if not db_field:
-        await update.message.reply_text("❌ Erreur: type de modification invalide.", reply_markup=get_menu_keyboard())
+        await update.message.reply_text("❌ Fout: ongeldig bewerkingstype.", reply_markup=get_menu_keyboard())
         context.user_data.clear()
         return ConversationHandler.END
     
@@ -632,11 +632,12 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         
         # Confirmer à l'utilisateur
-        field_name = {'description': 'description', 'materiel': 'matériel'}.get(modif_type, 'champ')
-        await update.message.reply_text(f"✅ {field_name.capitalize()} modifiée.", reply_markup=get_menu_keyboard())
+        field_names = {'description': 'Beschrijving', 'materiel': 'Materiaal'}
+        field_name = field_names.get(modif_type, 'Veld')
+        await update.message.reply_text(f"✅ {field_name} bijgewerkt.", reply_markup=get_menu_keyboard())
     except Exception as e:
         logger.error(f"Erreur modification: {e}")
-        await update.message.reply_text("❌ Erreur lors de la modification.", reply_markup=get_menu_keyboard())
+        await update.message.reply_text("❌ Fout bij het bewerken.", reply_markup=get_menu_keyboard())
     
     context.user_data.clear()
     return ConversationHandler.END
@@ -647,7 +648,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
     
     context.user_data.clear()
-    await update.message.reply_text("❌ Opération annulée.", reply_markup=get_menu_keyboard())
+    await update.message.reply_text("❌ Operatie geannuleerd.", reply_markup=get_menu_keyboard())
     return ConversationHandler.END
 
 # ==================== MAIN ====================
