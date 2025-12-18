@@ -287,8 +287,9 @@ async def voir_retours_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     if not check_authorization(update):
         return
     
-    # Récupérer tous les retours depuis la base de données
-    retours = get_all_retours()
+    # Récupérer tous les retours du groupe actuel depuis la base de données
+    chat_id = query.message.chat_id
+    retours = get_all_retours(chat_id)
     
     if not retours:
         message = "📋 **Liste des retours**\n\n"
