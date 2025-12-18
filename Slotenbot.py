@@ -69,59 +69,68 @@ def init_database():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS retours (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            message_id INTEGER UNIQUE,
+            message_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
             nom_client TEXT NOT NULL,
             adresse TEXT NOT NULL,
             description TEXT NOT NULL,
             materiel TEXT NOT NULL,
             date TEXT NOT NULL,
-            date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(message_id, chat_id)
         )
     ''')
+    # Ajouter la colonne chat_id si elle n'existe pas (migration pour bases existantes)
+    try:
+        cursor.execute('ALTER TABLE retours ADD COLUMN chat_id INTEGER')
+        conn.commit()
+    except sqlite3.OperationalError:
+        # La colonne existe déjà, pas de problème
+        pass
     conn.commit()
     conn.close()
 
-def add_retour_to_db(message_id: int, nom: str, adresse: str, description: str, materiel: str, date: str):
+def add_retour_to_db(message_id: int, chat_id: int, nom: str, adresse: str, description: str, materiel: str, date: str):
     """Ajoute un retour à la base de données"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO retours (message_id, nom_client, adresse, description, materiel, date)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (message_id, nom, adresse, description, materiel, date))
+        INSERT INTO retours (message_id, chat_id, nom_client, adresse, description, materiel, date)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (message_id, chat_id, nom, adresse, description, materiel, date))
     conn.commit()
     conn.close()
 
-def update_retour_in_db(message_id: int, field: str, value: str):
-    """Met à jour un champ d'un retour dans la base de données"""
+def update_retour_in_db(message_id: int, chat_id: int, field: str, value: str):
+    """Met à jour un champ d'un retour dans la base de données (spécifique au groupe)"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute(f'UPDATE retours SET {field} = ? WHERE message_id = ?', (value, message_id))
+    cursor.execute(f'UPDATE retours SET {field} = ? WHERE message_id = ? AND chat_id = ?', (value, message_id, chat_id))
     conn.commit()
     conn.close()
 
-def delete_retour_from_db(message_id: int):
-    """Supprime un retour de la base de données"""
+def delete_retour_from_db(message_id: int, chat_id: int):
+    """Supprime un retour de la base de données (spécifique au groupe)"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM retours WHERE message_id = ?', (message_id,))
+    cursor.execute('DELETE FROM retours WHERE message_id = ? AND chat_id = ?', (message_id, chat_id))
     conn.commit()
     conn.close()
 
-def get_all_retours() -> List[Tuple]:
-    """Récupère tous les retours de la base de données"""
+def get_all_retours(chat_id: int) -> List[Tuple]:
+    """Récupère tous les retours d'un groupe spécifique"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM retours ORDER BY date_creation DESC')
+    cursor.execute('SELECT * FROM retours WHERE chat_id = ? ORDER BY date_creation DESC', (chat_id,))
     retours = cursor.fetchall()
     conn.close()
     return retours
 
-def get_retour_by_message_id(message_id: int) -> Optional[Tuple]:
-    """Récupère un retour par son message_id"""
+def get_retour_by_message_id(message_id: int, chat_id: int) -> Optional[Tuple]:
+    """Récupère un retour par son message_id et chat_id"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM retours WHERE message_id = ?', (message_id,))
+    cursor.execute('SELECT * FROM retours WHERE message_id = ? AND chat_id = ?', (message_id, chat_id))
     retour = cursor.fetchone()
     conn.close()
     return retour
@@ -295,11 +304,11 @@ async def voir_retours_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     message = "📋 **Liste des retours d'intervention**\n\n"
     
     for idx, retour in enumerate(retours, 1):
-        # retour est un tuple: (id, message_id, nom_client, adresse, description, materiel, date, date_creation)
-        message += f"**{idx}. {retour[2]}**\n"
-        message += f"📍 {retour[3]}\n"
-        message += f"🔧 {retour[4][:50]}{'...' if len(retour[4]) > 50 else ''}\n"
-        message += f"📦 {retour[5]}\n\n"
+        # retour est un tuple: (id, message_id, chat_id, nom_client, adresse, description, materiel, date, date_creation)
+        message += f"**{idx}. {retour[3]}**\n"
+        message += f"📍 {retour[4]}\n"
+        message += f"🔧 {retour[5][:50]}{'...' if len(retour[5]) > 50 else ''}\n"
+        message += f"📦 {retour[6]}\n\n"
     
     message += f"_Total: {len(retours)} retour(s)_"
     
@@ -311,7 +320,7 @@ async def voir_retours_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         
         current_msg = first_part
         for idx, retour in enumerate(retours, 1):
-            retour_text = f"**{idx}. {retour[2]}**\n📍 {retour[3]}\n🔧 {retour[4][:50]}{'...' if len(retour[4]) > 50 else ''}\n📦 {retour[5]}\n\n"
+            retour_text = f"**{idx}. {retour[3]}**\n📍 {retour[4]}\n🔧 {retour[5][:50]}{'...' if len(retour[5]) > 50 else ''}\n📦 {retour[6]}\n\n"
             if len(current_msg) + len(retour_text) > remaining_chars:
                 break
             current_msg += retour_text
@@ -371,18 +380,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = query.message.chat_id
         
         # Récupérer les données depuis la base de données
-        retour_db = get_retour_by_message_id(message_id)
+        retour_db = get_retour_by_message_id(message_id, chat_id)
         if not retour_db:
             # Si pas dans la BDD, parser le message (rétrocompatibilité)
             message_text = query.message.text
             retour_data = parse_retour_message(message_text)
         else:
-            # retour_db: (id, message_id, nom_client, adresse, description, materiel, date, date_creation)
+            # retour_db: (id, message_id, chat_id, nom_client, adresse, description, materiel, date, date_creation)
             retour_data = {
-                'nom': retour_db[2],
-                'adresse': retour_db[3],
-                'description': retour_db[4],
-                'materiel': retour_db[5]
+                'nom': retour_db[3],
+                'adresse': retour_db[4],
+                'description': retour_db[5],
+                'materiel': retour_db[6]
             }
         
         context.user_data['message_id_editing'] = message_id
@@ -423,8 +432,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = context.user_data.get('chat_id_suppression')
         if message_id and chat_id:
             try:
-                # Supprimer de la base de données
-                delete_retour_from_db(message_id)
+                # Supprimer de la base de données (seulement ce retour de ce groupe)
+                delete_retour_from_db(message_id, chat_id)
                 # Supprimer le message dans Telegram
                 await context.bot.delete_message(
                     chat_id=chat_id,
@@ -536,6 +545,7 @@ async def collect_materiel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Enregistrer dans la base de données (date = "Non définie" pour compatibilité)
         add_retour_to_db(
             sent_message.message_id,
+            chat_id,  # Stocker le chat_id pour séparer par groupe
             retour['nom'],
             retour['adresse'],
             retour['description'],
@@ -587,16 +597,16 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
     
     # Mettre à jour dans la base de données
-    update_retour_in_db(message_id, db_field, new_value)
+    update_retour_in_db(message_id, chat_id, db_field, new_value)
     
     # Récupérer toutes les données mises à jour depuis la BDD
-    retour_db = get_retour_by_message_id(message_id)
+    retour_db = get_retour_by_message_id(message_id, chat_id)
     if retour_db:
-        # retour_db: (id, message_id, nom_client, adresse, description, materiel, date, date_creation)
-        nom = retour_db[2]
-        adresse = retour_db[3]
-        description = retour_db[4]
-        materiel = retour_db[5]
+        # retour_db: (id, message_id, chat_id, nom_client, adresse, description, materiel, date, date_creation)
+        nom = retour_db[3]
+        adresse = retour_db[4]
+        description = retour_db[5]
+        materiel = retour_db[6]
     else:
         # Fallback sur les données locales si la BDD échoue
         if modif_type == 'description':
