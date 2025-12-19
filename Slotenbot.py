@@ -354,6 +354,18 @@ async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_ques
     except Exception as e:
         logger.error(f"Erreur mise à jour message statut: {e}")
 
+async def menu_principal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler pour retourner au menu principal"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        welcome_text = "🤖 **Welkom bij de Afwerking Bot**\n\nKies een actie:"
+        try:
+            await query.edit_message_text(welcome_text, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Erreur retour menu: {e}")
+            await query.message.reply_text(welcome_text, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
+
 async def voir_retours_page_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler pour la pagination des retours"""
     query = update.callback_query
@@ -852,6 +864,8 @@ def main() -> None:
                 pass
     
     application.add_handler(CommandHandler("start", start))
+    # Handler séparé pour "menu_principal" (doit être avant le ConversationHandler)
+    application.add_handler(CallbackQueryHandler(menu_principal_handler, pattern="^menu_principal$"))
     # Handler séparé pour "voir_retours" (doit être avant le ConversationHandler)
     application.add_handler(CallbackQueryHandler(lambda u, c: voir_retours_handler(u, c, 0), pattern="^voir_retours$"))
     # Handler pour la pagination
