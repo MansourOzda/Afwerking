@@ -189,8 +189,7 @@ def get_statut_from_retour(retour: Tuple) -> str:
  COLLECTING_ADRESSE,
  COLLECTING_DESCRIPTION,
  COLLECTING_MATERIEL,
- COLLECTING_DATE,
- MODIFYING_FIELD) = range(7)
+ MODIFYING_FIELD) = range(6)
 
 # ==================== LOGGING ====================
 
@@ -864,6 +863,12 @@ def main() -> None:
                 pass
     
     application.add_handler(CommandHandler("start", start))
+    # Handler séparé pour "noop" (boutons non-cliquables, doit être avant ConversationHandler)
+    async def noop_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if query:
+            await query.answer()
+    application.add_handler(CallbackQueryHandler(noop_handler, pattern="^noop$"))
     # Handler séparé pour "menu_principal" (doit être avant le ConversationHandler)
     application.add_handler(CallbackQueryHandler(menu_principal_handler, pattern="^menu_principal$"))
     # Handler séparé pour "voir_retours" (doit être avant le ConversationHandler)
