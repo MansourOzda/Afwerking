@@ -233,7 +233,8 @@ def get_statut_from_retour(retour: Tuple) -> str:
  COLLECTING_ADRESSE,
  COLLECTING_DESCRIPTION,
  COLLECTING_MATERIEL,
- MODIFYING_FIELD) = range(6)
+ COLLECTING_EXTRA_INFO,
+ MODIFYING_FIELD) = range(7)
 
 # ==================== LOGGING ====================
 
@@ -287,7 +288,8 @@ def format_date_creation(date_creation_str: Optional[str]) -> str:
 
 def format_retour_message(nom: str, adresse: str, description: str, 
                          materiel: str, statut: str = "en_attente", 
-                         date_creation: Optional[str] = None) -> str:
+                         date_creation: Optional[str] = None,
+                         extra_info: Optional[str] = None) -> str:
     """Formate le message de retour d'intervention"""
     status_emoji = "✅" if statut == "fait" else "⏳"
     status_text = "Gedaan" if statut == "fait" else "In afwachting"
@@ -295,8 +297,13 @@ def format_retour_message(nom: str, adresse: str, description: str,
     message = "🔁 AFWERKING\n\n"
     message += f"Klant : {nom}\n"
     message += f"Adres : {adresse}\n"
-    message += f"Te doen : {description}\n"
+    # Supprimer la ligne "Te doen : {description}\n"
     message += f"Materiaal : {materiel}\n"
+    
+    # Ajouter extra_info seulement s'il existe
+    if extra_info:
+        message += f"Extra informatie : {extra_info}\n"
+    
     message += f"{status_emoji} Status : {status_text}\n"
     
     # Ajouter la date de création si disponible
@@ -317,7 +324,11 @@ def parse_retour_message(message_text: str) -> Dict[str, str]:
             elif line.startswith('Adres :'):
                 data['adresse'] = line.replace('Adres :', '').strip()
             elif line.startswith('Te doen :'):
+                # Ancien format, garder pour compatibilité
                 data['description'] = line.replace('Te doen :', '').strip()
+            elif line.startswith('Extra informatie :'):
+                # Nouveau format
+                data['extra_info'] = line.replace('Extra informatie :', '').strip()
             elif line.startswith('Materiaal :'):
                 data['materiel'] = line.replace('Materiaal :', '').strip()
     except Exception as e:
@@ -426,9 +437,17 @@ def get_cancel_keyboard() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
+def get_cancel_keyboard_with_skip() -> InlineKeyboardMarkup:
+    """Retourne le clavier avec bouton Passer et Annuler (pour extra_info optionnel)"""
+    keyboard = [
+        [InlineKeyboardButton("⏭️ Passer", callback_data="passer_extra_info")],
+        [InlineKeyboardButton("❌ Annuleren", callback_data="annuler_ajout")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 # ==================== HANDLERS ====================
 
-async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_question: str):
+async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_question: str, show_skip: bool = False):
     """Met à jour le message de statut avec les réponses déjà données"""
     retour = context.user_data.get('retour', {})
     message_id = context.user_data.get('status_message_id')
@@ -449,24 +468,25 @@ async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_ques
     elif 'nom' in retour:
         status_text += "📍 Adres : _In afwachting..._\n"
     
-    if retour.get('description'):
-        status_text += f"🔧 Beschrijving : {escape_markdown(retour['description'])}\n"
-    elif 'adresse' in retour:
-        status_text += "🔧 Beschrijving : _In afwachting..._\n"
-    
     if retour.get('materiel'):
         status_text += f"📦 Materiaal : {escape_markdown(retour['materiel'])}\n"
-    elif 'description' in retour:
+    elif 'adresse' in retour:
         status_text += "📦 Materiaal : _In afwachting..._\n"
+    
+    if retour.get('extra_info'):
+        status_text += f"ℹ️ Extra informatie : {escape_markdown(retour['extra_info'])}\n"
+    elif 'materiel' in retour:
+        status_text += "ℹ️ Extra informatie : _Optioneel..._\n"
     
     status_text += f"\n💬 {escape_markdown(current_question)}"
     
     try:
+        keyboard = get_cancel_keyboard_with_skip() if show_skip else get_cancel_keyboard()
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=status_text,
-            reply_markup=get_cancel_keyboard(),
+            reply_markup=keyboard,
             parse_mode='Markdown'
         )
     except Exception as e:
@@ -510,13 +530,16 @@ async def statut_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if retour:
         statut_actuel = get_statut_from_retour(retour)
         date_creation = retour[8] if len(retour) > 8 else None
+        # Utiliser description comme extra_info (pour compatibilité)
+        extra_info = retour[5] if retour[5] else None
         new_text = format_retour_message(
             retour[3],  # nom
             retour[4],  # adresse
-            retour[5],  # description
+            "",  # description vide maintenant
             retour[6],  # materiel
             statut_actuel,
-            date_creation
+            date_creation,
+            extra_info  # Passer comme extra_info
         )
         try:
             await query.edit_message_text(new_text, reply_markup=get_retour_keyboard(statut_actuel))
@@ -676,13 +699,16 @@ async def changer_statut_select_handler(update: Update, context: ContextTypes.DE
         date_creation = retour_updated[8] if len(retour_updated) > 8 else None
         
         # Mettre à jour le message dans le groupe (utiliser le chat_id du retour)
+        # Utiliser description comme extra_info (pour compatibilité)
+        extra_info = retour_updated[5] if retour_updated[5] else None
         new_text = format_retour_message(
             retour_updated[3],  # nom
             retour_updated[4],  # adresse
-            retour_updated[5],  # description
+            "",  # description vide maintenant
             retour_updated[6],  # materiel
             statut_final,
-            date_creation
+            date_creation,
+            extra_info  # Passer comme extra_info
         )
         
         # Rafraîchir immédiatement la liste AVANT d'essayer de modifier le message dans le groupe
@@ -962,8 +988,9 @@ async def collect_adresse(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except Exception:
         pass
     
-    await update_status_message(context, "🔧 Beschrijving van het werk te doen :")
-    return COLLECTING_DESCRIPTION
+    # Passer directement au matériel, sans demander la description
+    await update_status_message(context, "📦 Materiaal mee te nemen :")
+    return COLLECTING_MATERIEL
 
 async def collect_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Collecte la description"""
@@ -982,7 +1009,7 @@ async def collect_description(update: Update, context: ContextTypes.DEFAULT_TYPE
     return COLLECTING_MATERIEL
 
 async def collect_materiel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Collecte le matériel et finalise le retour"""
+    """Collecte le matériel"""
     if not check_authorization(update):
         return ConversationHandler.END
     
@@ -993,6 +1020,28 @@ async def collect_materiel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.delete()
     except Exception:
         pass
+    
+    # Demander "extra informatie" (optionnel) après le matériel
+    await update_status_message(context, "ℹ️ Extra informatie (optioneel) :", show_skip=True)
+    return COLLECTING_EXTRA_INFO
+
+async def collect_extra_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Collecte l'information extra (optionnel) et finalise le retour"""
+    if not check_authorization(update):
+        return ConversationHandler.END
+    
+    # Vérifier si c'est un callback (bouton "Passer")
+    if update.callback_query and update.callback_query.data == "passer_extra_info":
+        extra_info = ""
+        await update.callback_query.answer()
+    else:
+        extra_info = update.message.text.strip()
+        if extra_info:
+            context.user_data['retour']['extra_info'] = extra_info
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
     
     # Supprimer le message de statut
     message_id = context.user_data.get('status_message_id')
@@ -1008,7 +1057,7 @@ async def collect_materiel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     try:
         # Utiliser le chat_id du message actuel (n'importe quel groupe)
-        chat_id = update.message.chat_id
+        chat_id = update.message.chat_id if update.message else update.callback_query.message.chat_id
         # Enregistrer dans la base de données d'abord (date = "Non définie" pour compatibilité)
         # Note: On va créer un message temporaire puis le mettre à jour avec la date de création
         temp_message = await context.bot.send_message(
@@ -1017,12 +1066,17 @@ async def collect_materiel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             reply_markup=get_retour_keyboard("en_attente")
         )
         
+        # Description vide maintenant, extra_info stocké dans description pour compatibilité
+        # (ou on pourrait ajouter une colonne extra_info à la DB plus tard)
+        extra_info_value = retour.get('extra_info', '')
+        description_value = extra_info_value  # Stocker extra_info dans description pour l'instant
+        
         add_retour_to_db(
             temp_message.message_id,
             chat_id,  # Stocker le chat_id pour séparer par groupe
             retour['nom'],
             retour['adresse'],
-            retour['description'],
+            description_value,  # Utiliser extra_info comme description
             retour['materiel'],
             "Non définie"
         )
@@ -1035,10 +1089,11 @@ async def collect_materiel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         message_text = format_retour_message(
             retour['nom'],
             retour['adresse'],
-            retour['description'],
+            "",  # Description vide maintenant
             retour['materiel'],
             "en_attente",  # Statut par défaut
-            date_creation
+            date_creation,
+            extra_info_value  # Passer extra_info
         )
         
         # Mettre à jour le message avec le texte final
@@ -1048,15 +1103,17 @@ async def collect_materiel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             text=message_text,
             reply_markup=get_retour_keyboard("en_attente")
         )
+        target_chat_id = update.message.chat_id if update.message else update.callback_query.message.chat_id
         await context.bot.send_message(
-            chat_id=update.message.chat_id,
+            chat_id=target_chat_id,
             text="✅ Afwerking toegevoegd aan de groep.",
             reply_markup=get_menu_keyboard()
         )
     except Exception as e:
         logger.error(f"Erreur envoi message: {e}")
+        target_chat_id = update.message.chat_id if update.message else update.callback_query.message.chat_id
         await context.bot.send_message(
-            chat_id=update.message.chat_id,
+            chat_id=target_chat_id,
             text="❌ Fout bij het toevoegen van de afwerking.",
             reply_markup=get_menu_keyboard()
         )
@@ -1126,7 +1183,9 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
         statut_actuel = "en_attente"
     
     try:
-        new_text = format_retour_message(nom, adresse, description, materiel, statut_actuel, date_creation)
+        # Utiliser description comme extra_info si présent
+        extra_info = description if description and description != 'N/A' else None
+        new_text = format_retour_message(nom, adresse, "", materiel, statut_actuel, date_creation, extra_info)
         
         # Éditer le message dans le groupe (utiliser le chat_id stocké)
         await context.bot.edit_message_text(
@@ -1195,6 +1254,10 @@ def main() -> None:
             ],
             COLLECTING_MATERIEL: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, collect_materiel)
+            ],
+            COLLECTING_EXTRA_INFO: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, collect_extra_info),
+                CallbackQueryHandler(collect_extra_info, pattern="^passer_extra_info$")
             ],
             MODIFYING_FIELD: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_modification)
