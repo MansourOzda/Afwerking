@@ -1114,29 +1114,30 @@ async def collect_extra_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=get_retour_keyboard("en_attente")
         )
         
-        # Envoyer la confirmation dans le groupe
-        if update.message:
-            await update.message.reply_text(
-                "✅ Afwerking toegevoegd aan de groep.",
-                reply_markup=get_menu_keyboard()
-            )
-        elif update.callback_query:
-            await update.callback_query.message.reply_text(
-                "✅ Afwerking toegevoegd aan de groep.",
-                reply_markup=get_menu_keyboard()
-            )
+        # Envoyer la confirmation dans le groupe (utiliser send_message car le message peut avoir été supprimé)
+        await context.bot.send_message(
+            chat_id=group_chat_id,
+            text="✅ Afwerking toegevoegd aan de groep.",
+            reply_markup=get_menu_keyboard()
+        )
     except Exception as e:
         logger.error(f"Erreur envoi message: {e}")
-        if update.message:
-            await update.message.reply_text(
-                "❌ Fout bij het toevoegen van de afwerking.",
-                reply_markup=get_menu_keyboard()
-            )
-        elif update.callback_query:
-            await update.callback_query.message.reply_text(
-                "❌ Fout bij het toevoegen van de afwerking.",
-                reply_markup=get_menu_keyboard()
-            )
+        # Utiliser send_message au lieu de reply_text car le message peut avoir été supprimé
+        try:
+            group_chat_id = context.user_data.get('status_chat_id')
+            if not group_chat_id:
+                if update.message:
+                    group_chat_id = update.message.chat_id
+                elif update.callback_query:
+                    group_chat_id = update.callback_query.message.chat_id
+            if group_chat_id:
+                await context.bot.send_message(
+                    chat_id=group_chat_id,
+                    text="❌ Fout bij het toevoegen van de afwerking.",
+                    reply_markup=get_menu_keyboard()
+                )
+        except Exception as e2:
+            logger.error(f"Erreur envoi message d'erreur: {e2}")
     
     context.user_data.clear()
     return ConversationHandler.END
