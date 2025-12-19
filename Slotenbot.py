@@ -58,12 +58,18 @@ USER_IDS_STR = os.getenv("USER_IDS", "395799444")
 USER_IDS = [int(uid.strip()) for uid in USER_IDS_STR.split(",") if uid.strip()]
 
 # Nom de la base de données
-DB_NAME = "retours_intervention.db"
+# Utiliser le volume Railway si disponible (/data), sinon répertoire local
+DB_PATH = os.getenv("DB_PATH", "retours_intervention.db")
+DB_NAME = DB_PATH
 
 # ==================== BASE DE DONNÉES ====================
 
 def init_database():
     """Initialise la base de données SQLite"""
+    # Créer le répertoire parent si nécessaire (pour le volume Railway /data)
+    if os.path.dirname(DB_NAME):
+        os.makedirs(os.path.dirname(DB_NAME), exist_ok=True)
+    
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
