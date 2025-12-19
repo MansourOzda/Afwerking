@@ -229,12 +229,11 @@ def get_statut_from_retour(retour: Tuple) -> str:
 
 # États pour ConversationHandler
 (SELECTING_ACTION,
- COLLECTING_NOM_CLIENT,
  COLLECTING_ADRESSE,
  COLLECTING_DESCRIPTION,
  COLLECTING_MATERIEL,
  COLLECTING_EXTRA_INFO,
- MODIFYING_FIELD) = range(7)
+ MODIFYING_FIELD) = range(6)
 
 # ==================== LOGGING ====================
 
@@ -286,7 +285,7 @@ def format_date_creation(date_creation_str: Optional[str]) -> str:
     except (ValueError, AttributeError, IndexError):
         return str(date_creation_str) if date_creation_str else "Onbekend"
 
-def format_retour_message(nom: str, adresse: str, description: str, 
+def format_retour_message(adresse: str, description: str, 
                          materiel: str, statut: str = "en_attente", 
                          date_creation: Optional[str] = None,
                          extra_info: Optional[str] = None) -> str:
@@ -295,9 +294,7 @@ def format_retour_message(nom: str, adresse: str, description: str,
     status_text = "Gedaan" if statut == "fait" else "In afwachting"
     
     message = "🔁 AFWERKING\n\n"
-    message += f"Klant : {nom}\n"
     message += f"Adres : {adresse}\n"
-    # Supprimer la ligne "Te doen : {description}\n"
     message += f"Materiaal : {materiel}\n"
     
     # Ajouter extra_info seulement s'il existe
@@ -373,13 +370,13 @@ def get_liste_statut_keyboard(retours: List, page: int, total_pages: int, chat_i
     # Ajouter un bouton pour chaque retour de la page
     for retour in retours:
         message_id = retour[1]  # message_id est à l'index 1
-        nom = retour[3]  # nom_client est à l'index 3
+        adresse = retour[4]  # adresse est à l'index 4
         statut = get_statut_from_retour(retour)
         
-        # Texte du bouton : nom du client + emoji statut + action
+        # Texte du bouton : adresse + emoji statut + action
         status_emoji = "✅" if statut == "fait" else "⏳"
         action_text = "→ In afwachting" if statut == "fait" else "→ Gedaan"
-        button_text = f"{status_emoji} {nom} {action_text}"
+        button_text = f"{status_emoji} {adresse[:30]}{'...' if len(adresse) > 30 else ''} {action_text}"
         
         # Callback data : changer_statut_select_<message_id>_<page> pour garder la page actuelle
         keyboard.append([InlineKeyboardButton(button_text, callback_data=f"changer_statut_select_{message_id}_{page}")])
@@ -412,7 +409,6 @@ def get_menu_keyboard() -> InlineKeyboardMarkup:
 def get_modifier_keyboard() -> InlineKeyboardMarkup:
     """Retourne le clavier pour modifier un retour"""
     keyboard = [
-        [InlineKeyboardButton("Naam bewerken", callback_data="modif_nom")],
         [InlineKeyboardButton("Adres bewerken", callback_data="modif_adresse")],
         [InlineKeyboardButton("Beschrijving bewerken", callback_data="modif_description")],
         [InlineKeyboardButton("Materiaal bewerken", callback_data="modif_materiel")],
@@ -458,14 +454,9 @@ async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_ques
     
     status_text = "📝 **Afwerking toevoegen**\n\n"
     
-    if retour.get('nom'):
-        status_text += f"👤 Naam van klant : {escape_markdown(retour['nom'])}\n"
-    else:
-        status_text += "👤 Naam van klant : _In afwachting..._\n"
-    
     if retour.get('adresse'):
         status_text += f"📍 Adres : {escape_markdown(retour['adresse'])}\n"
-    elif 'nom' in retour:
+    else:
         status_text += "📍 Adres : _In afwachting..._\n"
     
     if retour.get('materiel'):
@@ -537,7 +528,6 @@ async def statut_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Utiliser description comme extra_info (pour compatibilité)
         extra_info = retour[5] if retour[5] else None
         new_text = format_retour_message(
-            retour[3],  # nom
             retour[4],  # adresse
             "",  # description vide maintenant
             retour[6],  # materiel
@@ -625,7 +615,7 @@ async def changer_statut_handler(update: Update, context: ContextTypes.DEFAULT_T
         status_text = "Gedaan" if statut == "fait" else "In afwachting"
         
         global_idx = start_idx + idx
-        message += f"**{global_idx}. {retour[3]}** {status_emoji}\n"
+        message += f"**{global_idx}.** {status_emoji}\n"
         message += f"📍 {retour[4]}\n"
         message += f"Status: {status_text}\n\n"
     
@@ -706,7 +696,6 @@ async def changer_statut_select_handler(update: Update, context: ContextTypes.DE
         # Utiliser description comme extra_info (pour compatibilité)
         extra_info = retour_updated[5] if retour_updated[5] else None
         new_text = format_retour_message(
-            retour_updated[3],  # nom
             retour_updated[4],  # adresse
             "",  # description vide maintenant
             retour_updated[6],  # materiel
@@ -850,15 +839,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Envoyer le message de statut dans le groupe
         chat_id = query.message.chat_id
         status_msg = await query.message.reply_text(
-            "📝 **Afwerking toevoegen**\n\n👤 Naam van klant : _In afwachting..._",
+            "📝 **Afwerking toevoegen**\n\n📍 Adres : _In afwachting..._",
             reply_markup=get_cancel_keyboard(),
             parse_mode='Markdown'
         )
         context.user_data['status_message_id'] = status_msg.message_id
         context.user_data['status_chat_id'] = chat_id  # Stocker chat_id pour le groupe
         await query.edit_message_reply_markup(reply_markup=None)  # Retirer les boutons temporairement
-        await update_status_message(context, "👤 Naam van klant :")
-        return COLLECTING_NOM_CLIENT
+        await update_status_message(context, "📍 Adres :")
+        return COLLECTING_ADRESSE
     
     elif data == "modifier_retour":
         message_id = query.message.message_id
@@ -874,7 +863,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             # retour_db: (id, message_id, chat_id, nom_client, adresse, description, materiel, date, date_creation, statut)
             retour_data = {
-                'nom': retour_db[3],
                 'adresse': retour_db[4],
                 'description': retour_db[5],
                 'materiel': retour_db[6]
@@ -899,11 +887,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_confirmation_keyboard()
         )
         return SELECTING_ACTION
-    
-    elif data == "modif_nom":
-        context.user_data['modif_type'] = 'nom'
-        await query.edit_message_text("✏️ Nieuwe naam van klant :")
-        return MODIFYING_FIELD
     
     elif data == "modif_adresse":
         context.user_data['modif_type'] = 'adresse'
@@ -963,23 +946,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return SELECTING_ACTION
 
-async def collect_nom_client(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Collecte le nom du client"""
-    if not check_authorization(update):
-        return ConversationHandler.END
-    
-    nom = update.message.text.strip()
-    context.user_data['retour']['nom'] = nom
-    
-    # Supprimer le message de réponse de l'utilisateur pour réduire l'encombrement
-    try:
-        await update.message.delete()
-    except Exception:
-        pass
-    
-    # Mettre à jour le message de statut
-    await update_status_message(context, "📍 Adres :")
-    return COLLECTING_ADRESSE
 
 async def collect_adresse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Collecte l'adresse"""
@@ -1086,7 +1052,7 @@ async def collect_extra_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
         add_retour_to_db(
             temp_message.message_id,
             group_chat_id,
-            retour['nom'],
+            "",  # nom vide maintenant
             retour['adresse'],
             description_value,
             retour['materiel'],
@@ -1097,7 +1063,6 @@ async def collect_extra_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
         date_creation = retour_db[8] if retour_db and len(retour_db) > 8 else None
         
         message_text = format_retour_message(
-            retour['nom'],
             retour['adresse'],
             "",  # Description vide maintenant
             retour['materiel'],
@@ -1163,7 +1128,6 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # Mapper le type de modification au nom de colonne dans la BDD
     field_mapping = {
-        'nom': 'nom_client',
         'adresse': 'adresse',
         'description': 'description',
         'materiel': 'materiel'
@@ -1185,7 +1149,6 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
     retour_db = get_retour_by_message_id(message_id, chat_id)
     if retour_db:
         # retour_db: (id, message_id, chat_id, nom_client, adresse, description, materiel, date, date_creation, statut)
-        nom = retour_db[3]
         adresse = retour_db[4]
         description = retour_db[5]
         materiel = retour_db[6]
@@ -1193,16 +1156,13 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
         statut_actuel = get_statut_from_retour(retour_db)
     else:
         # Fallback sur les données locales si la BDD échoue
-        if modif_type == 'nom':
-            retour_data['nom'] = new_value
-        elif modif_type == 'adresse':
+        if modif_type == 'adresse':
             retour_data['adresse'] = new_value
         elif modif_type == 'description':
             retour_data['description'] = new_value
         elif modif_type == 'materiel':
             retour_data['materiel'] = new_value
         
-        nom = retour_data.get('nom', 'N/A')
         adresse = retour_data.get('adresse', 'N/A')
         description = retour_data.get('description', 'N/A')
         materiel = retour_data.get('materiel', 'N/A')
@@ -1212,7 +1172,7 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         # Utiliser description comme extra_info si présent
         extra_info = description if description and description != 'N/A' else None
-        new_text = format_retour_message(nom, adresse, "", materiel, statut_actuel, date_creation, extra_info)
+        new_text = format_retour_message(adresse, "", materiel, statut_actuel, date_creation, extra_info)
         
         # Éditer le message dans le groupe (utiliser le chat_id stocké)
         await context.bot.edit_message_text(
@@ -1224,7 +1184,6 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         # Confirmer à l'utilisateur dans le groupe
         field_names = {
-            'nom': 'Naam',
             'adresse': 'Adres',
             'description': 'Beschrijving',
             'materiel': 'Materiaal'
@@ -1279,9 +1238,6 @@ def main() -> None:
         ],
         states={
             SELECTING_ACTION: [CallbackQueryHandler(button_handler)],
-            COLLECTING_NOM_CLIENT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, collect_nom_client)
-            ],
             COLLECTING_ADRESSE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, collect_adresse)
             ],
