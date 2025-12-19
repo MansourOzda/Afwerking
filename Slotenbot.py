@@ -465,12 +465,17 @@ async def voir_retours_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         status_emoji = "✅" if statut == "fait" else "⏳"
         status_text = "Gedaan" if statut == "fait" else "In afwachting"
         
+        # Récupérer et formater la date de création
+        date_creation = retour[8] if len(retour) > 8 else None
+        date_formatee = format_date_creation(date_creation)
+        
         global_idx = start_idx + idx
         message += f"**{global_idx}. {retour[3]}** {status_emoji}\n"
         message += f"📍 {retour[4]}\n"
         message += f"🔧 {retour[5][:50]}{'...' if len(retour[5]) > 50 else ''}\n"
         message += f"📦 {retour[6]}\n"
-        message += f"Status: {status_text}\n\n"
+        message += f"Status: {status_text}\n"
+        message += f"📅 Gemaakt op: {date_formatee}\n\n"
     
     message += f"_Totaal: {total} afwerking(en) - Pagina {page+1}/{total_pages}_"
     
