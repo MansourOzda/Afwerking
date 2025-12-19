@@ -215,6 +215,13 @@ def check_authorization(update: Update) -> bool:
 
 # ==================== FONCTIONS UTILITAIRES ====================
 
+def escape_markdown(text: str) -> str:
+    """Échappe les caractères spéciaux Markdown"""
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in special_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
+
 def format_retour_message(nom: str, adresse: str, description: str, 
                          materiel: str, statut: str = "en_attente") -> str:
     """Formate le message de retour d'intervention"""
@@ -322,26 +329,26 @@ async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_ques
     status_text = "📝 **Afwerking toevoegen**\n\n"
     
     if retour.get('nom'):
-        status_text += f"👤 Naam van klant : {retour['nom']}\n"
+        status_text += f"👤 Naam van klant : {escape_markdown(retour['nom'])}\n"
     else:
         status_text += "👤 Naam van klant : _In afwachting..._\n"
     
     if retour.get('adresse'):
-        status_text += f"📍 Adres : {retour['adresse']}\n"
+        status_text += f"📍 Adres : {escape_markdown(retour['adresse'])}\n"
     elif 'nom' in retour:
         status_text += "📍 Adres : _In afwachting..._\n"
     
     if retour.get('description'):
-        status_text += f"🔧 Beschrijving : {retour['description']}\n"
+        status_text += f"🔧 Beschrijving : {escape_markdown(retour['description'])}\n"
     elif 'adresse' in retour:
         status_text += "🔧 Beschrijving : _In afwachting..._\n"
     
     if retour.get('materiel'):
-        status_text += f"📦 Materiaal : {retour['materiel']}\n"
+        status_text += f"📦 Materiaal : {escape_markdown(retour['materiel'])}\n"
     elif 'description' in retour:
         status_text += "📦 Materiaal : _In afwachting..._\n"
     
-    status_text += f"\n💬 {current_question}"
+    status_text += f"\n💬 {escape_markdown(current_question)}"
     
     try:
         await context.bot.edit_message_text(
