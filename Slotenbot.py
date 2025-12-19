@@ -111,6 +111,33 @@ def init_database():
             conn.commit()
         except sqlite3.OperationalError:
             pass
+        
+        # Créer des index pour améliorer les performances des requêtes fréquentes
+        # Index sur chat_id : utilisé dans presque toutes les requêtes
+        try:
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_chat_id ON retours(chat_id)')
+        except sqlite3.OperationalError:
+            pass
+        
+        # Index sur message_id et chat_id (composite) : utilisé pour les recherches par retour spécifique
+        try:
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_message_chat ON retours(message_id, chat_id)')
+        except sqlite3.OperationalError:
+            pass
+        
+        # Index sur statut : utilisé pour filtrer par statut
+        try:
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_statut ON retours(statut)')
+        except sqlite3.OperationalError:
+            pass
+        
+        # Index sur date_creation : utilisé pour le tri chronologique
+        try:
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_date_creation ON retours(date_creation DESC)')
+        except sqlite3.OperationalError:
+            pass
+        
+        conn.commit()
         # La connexion se ferme automatiquement grâce au context manager
 
 def add_retour_to_db(message_id: int, chat_id: int, nom: str, adresse: str, description: str, materiel: str, date: str):
