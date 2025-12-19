@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import ChatMigrated
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -259,6 +260,19 @@ def check_authorization(update: Update) -> bool:
 
 # ==================== FONCTIONS UTILITAIRES ====================
 
+async def handle_chat_migration(func, *args, **kwargs):
+    """Gère les migrations de groupe vers supergroupe en réessayant avec le nouveau chat_id"""
+    try:
+        return await func(*args, **kwargs)
+    except ChatMigrated as e:
+        # Le groupe a été migré vers un supergroupe, utiliser le nouveau chat_id
+        logger.info(f"Groupe migré vers supergroupe. Nouveau chat_id: {e.migrate_to_chat_id}")
+        # Remplacer le chat_id dans les kwargs si présent
+        if 'chat_id' in kwargs:
+            kwargs['chat_id'] = e.migrate_to_chat_id
+        # Réessayer avec le nouveau chat_id
+        return await func(*args, **kwargs)
+
 def escape_markdown(text: str) -> str:
     """Échappe les caractères spéciaux Markdown"""
     special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
@@ -480,6 +494,20 @@ async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_ques
             reply_markup=keyboard,
             parse_mode='Markdown'
         )
+    except ChatMigrated as e:
+        # Le groupe a été migré vers un supergroupe, mettre à jour le chat_id et réessayer
+        logger.info(f"Groupe migré vers supergroupe. Nouveau chat_id: {e.migrate_to_chat_id}")
+        context.user_data['status_chat_id'] = e.migrate_to_chat_id
+        try:
+            await context.bot.edit_message_text(
+                chat_id=e.migrate_to_chat_id,
+                message_id=message_id,
+                text=status_text,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+        except Exception as e2:
+            logger.error(f"Erreur mise à jour message statut après migration: {e2}")
     except Exception as e:
         logger.error(f"Erreur mise à jour message statut: {e}")
 
@@ -819,6 +847,14 @@ async def afwerken(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if message_id and chat_id:
         try:
             await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except ChatMigrated as e:
+            # Le groupe a été migré, mettre à jour le chat_id et réessayer
+            logger.info(f"Groupe migré vers supergroupe. Nouveau chat_id: {e.migrate_to_chat_id}")
+            chat_id = e.migrate_to_chat_id
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception:
+                pass
         except Exception:
             pass  # Le message peut déjà être supprimé
     
@@ -828,10 +864,20 @@ async def afwerken(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message += "Kies een actie :"
     
     # Toujours répondre dans le groupe/conversation actuelle
-    await update.message.reply_text(
-        message,
-        reply_markup=get_menu_keyboard()
-    )
+    try:
+        await update.message.reply_text(
+            message,
+            reply_markup=get_menu_keyboard()
+        )
+    except ChatMigrated as e:
+        # Le groupe a été migré vers un supergroupe
+        logger.info(f"Groupe migré vers supergroupe. Nouveau chat_id: {e.migrate_to_chat_id}")
+        # Réessayer avec le nouveau chat_id
+        await context.bot.send_message(
+            chat_id=e.migrate_to_chat_id,
+            text=message,
+            reply_markup=get_menu_keyboard()
+        )
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler principal pour les boutons"""
@@ -848,11 +894,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['retour'] = {}
         # Envoyer le message de statut dans le groupe
         chat_id = query.message.chat_id
-        status_msg = await query.message.reply_text(
-            "📝 **Afwerking toevoegen**\n\n📍 Adres : _In afwachting..._",
-            reply_markup=get_cancel_keyboard(),
-            parse_mode='Markdown'
-        )
+        try:
+            status_msg = await query.message.reply_text(
+                "📝 **Afwerking toevoegen**\n\n📍 Adres : _In afwachting..._",
+                reply_markup=get_cancel_keyboard(),
+                parse_mode='Markdown'
+            )
+            chat_id = status_msg.chat_id  # Utiliser le chat_id du message envoyé (peut être différent après migration)
+        except ChatMigrated as e:
+            # Le groupe a été migré vers un supergroupe
+            logger.info(f"Groupe migré vers supergroupe. Nouveau chat_id: {e.migrate_to_chat_id}")
+            chat_id = e.migrate_to_chat_id
+            # Réessayer avec le nouveau chat_id
+            status_msg = await context.bot.send_message(
+                chat_id=chat_id,
+                text="📝 **Afwerking toevoegen**\n\n📍 Adres : _In afwachting..._",
+                reply_markup=get_cancel_keyboard(),
+                parse_mode='Markdown'
+            )
         context.user_data['status_message_id'] = status_msg.message_id
         context.user_data['status_chat_id'] = chat_id  # Stocker chat_id pour le groupe
         await query.edit_message_reply_markup(reply_markup=None)  # Retirer les boutons temporairement
@@ -1050,11 +1109,23 @@ async def collect_extra_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
             raise ValueError("Impossible de déterminer le chat_id du groupe")
         
         # Enregistrer dans la base de données d'abord
-        temp_message = await context.bot.send_message(
-            chat_id=group_chat_id,  # Dans le groupe
-            text="⏳ Bezig met toevoegen...",
-            reply_markup=get_retour_keyboard("en_attente")
-        )
+        try:
+            temp_message = await context.bot.send_message(
+                chat_id=group_chat_id,  # Dans le groupe
+                text="⏳ Bezig met toevoegen...",
+                reply_markup=get_retour_keyboard("en_attente")
+            )
+            group_chat_id = temp_message.chat_id  # Utiliser le chat_id du message envoyé
+        except ChatMigrated as e:
+            # Le groupe a été migré vers un supergroupe
+            logger.info(f"Groupe migré vers supergroupe. Nouveau chat_id: {e.migrate_to_chat_id}")
+            group_chat_id = e.migrate_to_chat_id
+            # Réessayer avec le nouveau chat_id
+            temp_message = await context.bot.send_message(
+                chat_id=group_chat_id,
+                text="⏳ Bezig met toevoegen...",
+                reply_markup=get_retour_keyboard("en_attente")
+            )
         
         extra_info_value = retour.get('extra_info', '')
         description_value = extra_info_value
@@ -1082,19 +1153,50 @@ async def collect_extra_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         
         # Mettre à jour le message dans le groupe
-        sent_message = await context.bot.edit_message_text(
-            chat_id=group_chat_id,
-            message_id=temp_message.message_id,
-            text=message_text,
-            reply_markup=get_retour_keyboard("en_attente")
-        )
+        try:
+            sent_message = await context.bot.edit_message_text(
+                chat_id=group_chat_id,
+                message_id=temp_message.message_id,
+                text=message_text,
+                reply_markup=get_retour_keyboard("en_attente")
+            )
+        except ChatMigrated as e:
+            # Le groupe a été migré vers un supergroupe
+            logger.info(f"Groupe migré vers supergroupe. Nouveau chat_id: {e.migrate_to_chat_id}")
+            group_chat_id = e.migrate_to_chat_id
+            # Mettre à jour le chat_id dans la base de données
+            try:
+                old_chat_id = context.user_data.get('status_chat_id')
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('UPDATE retours SET chat_id = ? WHERE message_id = ? AND chat_id = ?', 
+                                 (group_chat_id, temp_message.message_id, old_chat_id))
+                    conn.commit()
+            except Exception as db_error:
+                logger.warning(f"Erreur mise à jour chat_id dans BDD: {db_error}")
+            # Réessayer avec le nouveau chat_id
+            sent_message = await context.bot.edit_message_text(
+                chat_id=group_chat_id,
+                message_id=temp_message.message_id,
+                text=message_text,
+                reply_markup=get_retour_keyboard("en_attente")
+            )
         
         # Envoyer la confirmation dans le groupe (utiliser send_message car le message peut avoir été supprimé)
-        await context.bot.send_message(
-            chat_id=group_chat_id,
-            text="✅ Afwerking toegevoegd aan de groep.",
-            reply_markup=get_menu_keyboard()
-        )
+        try:
+            await context.bot.send_message(
+                chat_id=group_chat_id,
+                text="✅ Afwerking toegevoegd aan de groep.",
+                reply_markup=get_menu_keyboard()
+            )
+        except ChatMigrated as e:
+            # Le groupe a été migré vers un supergroupe
+            logger.info(f"Groupe migré vers supergroupe. Nouveau chat_id: {e.migrate_to_chat_id}")
+            await context.bot.send_message(
+                chat_id=e.migrate_to_chat_id,
+                text="✅ Afwerking toegevoegd aan de groep.",
+                reply_markup=get_menu_keyboard()
+            )
     except Exception as e:
         logger.error(f"Erreur envoi message: {e}")
         # Utiliser send_message au lieu de reply_text car le message peut avoir été supprimé
@@ -1276,13 +1378,30 @@ def main() -> None:
     # Handler d'erreurs global
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Gère les erreurs non capturées"""
-        logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
+        error = context.error
+        
+        # Gérer spécifiquement les migrations de groupe
+        if isinstance(error, ChatMigrated):
+            logger.info(f"Groupe migré vers supergroupe. Nouveau chat_id: {error.migrate_to_chat_id}")
+            # Ne pas logger comme une erreur, c'est normal
+            return
+        
+        logger.error(f"Exception while handling an update: {error}", exc_info=error)
         
         # Essayer d'envoyer un message d'erreur à l'utilisateur si possible
         if isinstance(update, Update) and update.effective_message:
             try:
                 error_message = "❌ Er is een fout opgetreden. Probeer het later opnieuw."
                 await update.effective_message.reply_text(error_message)
+            except ChatMigrated as e:
+                # Le groupe a été migré, essayer avec le nouveau chat_id
+                try:
+                    await context.bot.send_message(
+                        chat_id=e.migrate_to_chat_id,
+                        text=error_message
+                    )
+                except Exception:
+                    pass
             except Exception:
                 # Si on ne peut pas envoyer de message, on log juste l'erreur
                 pass
