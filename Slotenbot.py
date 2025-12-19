@@ -72,7 +72,9 @@ def get_db_connection():
     if os.path.dirname(DB_NAME):
         os.makedirs(os.path.dirname(DB_NAME), exist_ok=True)
     
-    conn = sqlite3.connect(DB_NAME)
+    # Timeout de 10 secondes pour éviter les blocages prolongés
+    # Si la base est verrouillée par une autre opération, attendre max 10s
+    conn = sqlite3.connect(DB_NAME, timeout=10.0)
     conn.row_factory = sqlite3.Row  # Permet l'accès par nom de colonne
     try:
         yield conn
