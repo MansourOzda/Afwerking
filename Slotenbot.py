@@ -903,6 +903,8 @@ def main() -> None:
         if query:
             await query.answer()
     application.add_handler(CallbackQueryHandler(noop_handler, pattern="^noop$"))
+    # Handler séparé pour "annuler_ajout" (doit être avant le ConversationHandler)
+    application.add_handler(CallbackQueryHandler(annuler_ajout_handler, pattern="^annuler_ajout$"))
     # Handler séparé pour "menu_principal" (doit être avant le ConversationHandler)
     application.add_handler(CallbackQueryHandler(menu_principal_handler, pattern="^menu_principal$"))
     # Handler séparé pour "voir_retours" (doit être avant le ConversationHandler)
