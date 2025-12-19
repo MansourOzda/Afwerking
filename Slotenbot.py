@@ -411,6 +411,43 @@ async def annuler_ajout_handler(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data.clear()
         await query.message.reply_text("❌ Toevoegen geannuleerd.", reply_markup=get_menu_keyboard())
 
+async def statut_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler pour changer le statut d'un retour"""
+    query = update.callback_query
+    if not query:
+        return
+    
+    await query.answer()
+    
+    data = query.data
+    message_id = query.message.message_id
+    chat_id = query.message.chat_id
+    
+    nouveau_statut = "fait" if data == "statut_fait" else "en_attente"
+    update_statut_in_db(message_id, chat_id, nouveau_statut)
+    
+    # Récupérer le retour mis à jour
+    retour = get_retour_by_message_id(message_id, chat_id)
+    if retour:
+        statut_actuel = get_statut_from_retour(retour)
+        date_creation = retour[8] if len(retour) > 8 else None
+        new_text = format_retour_message(
+            retour[3],  # nom
+            retour[4],  # adresse
+            retour[5],  # description
+            retour[6],  # materiel
+            statut_actuel,
+            date_creation
+        )
+        try:
+            await query.edit_message_text(new_text, reply_markup=get_retour_keyboard(statut_actuel))
+            await query.answer("✅ Status bijgewerkt")
+        except Exception as e:
+            logger.error(f"Erreur mise à jour statut: {e}")
+            await query.answer("❌ Fout bij het bijwerken van de status", show_alert=True)
+    else:
+        await query.answer("❌ Afwerking niet gevonden", show_alert=True)
+
 async def menu_principal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler pour retourner au menu principal"""
     query = update.callback_query
@@ -617,32 +654,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         return ConversationHandler.END
     
-    elif data == "statut_fait" or data == "statut_attente":
-        # Changer le statut d'un retour
-        message_id = query.message.message_id
-        chat_id = query.message.chat_id
-        
-        nouveau_statut = "fait" if data == "statut_fait" else "en_attente"
-        update_statut_in_db(message_id, chat_id, nouveau_statut)
-        
-        # Récupérer le retour mis à jour
-        retour = get_retour_by_message_id(message_id, chat_id)
-        if retour:
-            statut_actuel = get_statut_from_retour(retour)
-            date_creation = retour[8] if len(retour) > 8 else None  # date_creation à l'index 8
-            new_text = format_retour_message(
-                retour[3],  # nom
-                retour[4],  # adresse
-                retour[5],  # description
-                retour[6],  # materiel
-                statut_actuel,
-                date_creation
-            )
-            await query.edit_message_text(new_text, reply_markup=get_retour_keyboard(statut_actuel))
-            await query.answer("✅ Status bijgewerkt")
-        else:
-            await query.answer("❌ Afwerking niet gevonden", show_alert=True)
-        return ConversationHandler.END
     
     elif data == "menu_principal":
         # Retour au menu principal
@@ -954,6 +965,8 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(noop_handler, pattern="^noop$"))
     # Handler séparé pour "annuler_ajout" (doit être avant le ConversationHandler)
     application.add_handler(CallbackQueryHandler(annuler_ajout_handler, pattern="^annuler_ajout$"))
+    # Handler séparé pour changer le statut (doit être avant le ConversationHandler)
+    application.add_handler(CallbackQueryHandler(statut_handler, pattern="^(statut_fait|statut_attente)$"))
     # Handler séparé pour "menu_principal" (doit être avant le ConversationHandler)
     application.add_handler(CallbackQueryHandler(menu_principal_handler, pattern="^menu_principal$"))
     # Handler séparé pour "voir_retours" (doit être avant le ConversationHandler)
