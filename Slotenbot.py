@@ -448,12 +448,12 @@ def get_cancel_keyboard_with_skip() -> InlineKeyboardMarkup:
 # ==================== HANDLERS ====================
 
 async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_question: str, show_skip: bool = False):
-    """Met à jour le message de statut avec les réponses déjà données"""
+    """Met à jour le message de statut avec les réponses déjà données (en privé)"""
     retour = context.user_data.get('retour', {})
     message_id = context.user_data.get('status_message_id')
-    chat_id = context.user_data.get('status_chat_id')
+    user_id = context.user_data.get('status_user_id')  # Utiliser user_id au lieu de chat_id
     
-    if not message_id or not chat_id:
+    if not message_id or not user_id:
         return
     
     status_text = "📝 **Afwerking toevoegen**\n\n"
@@ -483,7 +483,7 @@ async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_ques
     try:
         keyboard = get_cancel_keyboard_with_skip() if show_skip else get_cancel_keyboard()
         await context.bot.edit_message_text(
-            chat_id=chat_id,
+            chat_id=user_id,  # Envoyer en privé à l'utilisateur
             message_id=message_id,
             text=status_text,
             reply_markup=keyboard,
@@ -498,17 +498,22 @@ async def annuler_ajout_handler(update: Update, context: ContextTypes.DEFAULT_TY
     if query:
         await query.answer()
         message_id = context.user_data.get('status_message_id')
-        chat_id = context.user_data.get('status_chat_id')
+        user_id = context.user_data.get('status_user_id')  # Utiliser user_id au lieu de chat_id
         
-        # Supprimer le message de statut
-        if message_id and chat_id:
+        # Supprimer le message de statut (en privé)
+        if message_id and user_id:
             try:
-                await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+                await context.bot.delete_message(chat_id=user_id, message_id=message_id)
             except Exception:
                 pass
         
         context.user_data.clear()
-        await query.message.reply_text("❌ Toevoegen geannuleerd.", reply_markup=get_menu_keyboard())
+        # Envoyer la confirmation en privé à l'utilisateur
+        await context.bot.send_message(
+            chat_id=query.from_user.id,
+            text="❌ Toevoegen geannuleerd.",
+            reply_markup=get_menu_keyboard()
+        )
 
 async def statut_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler pour changer le statut d'un retour"""
@@ -819,13 +824,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not check_authorization(update):
         return
     
+    user_id = update.effective_user.id if update.effective_user else update.message.from_user.id
     context.user_data.clear()
     
     message = "🔧 Afwerkingen beheer\n\n"
     message += "Kies een actie :"
     
-    await update.message.reply_text(
-        message,
+    # Envoyer le menu en privé à l'utilisateur
+    await context.bot.send_message(
+        chat_id=user_id,
+        text=message,
         reply_markup=get_menu_keyboard()
     )
 
@@ -842,14 +850,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "ajouter_retour":
         # Créer un message éditable pour le formulaire
         context.user_data['retour'] = {}
-        # Le message sera créé par update_status_message avec le bouton annuler
-        status_msg = await query.message.reply_text(
-            "📝 **Afwerking toevoegen**\n\n👤 Naam van klant : _In afwachting..._",
+        # Envoyer le message de statut en privé à l'utilisateur
+        user_id = query.from_user.id
+        status_msg = await context.bot.send_message(
+            chat_id=user_id,  # Envoyer en privé
+            text="📝 **Afwerking toevoegen**\n\n👤 Naam van klant : _In afwachting..._",
             reply_markup=get_cancel_keyboard(),
             parse_mode='Markdown'
         )
         context.user_data['status_message_id'] = status_msg.message_id
-        context.user_data['status_chat_id'] = status_msg.chat_id
+        context.user_data['status_user_id'] = user_id  # Stocker user_id au lieu de chat_id
+        # Stocker aussi le chat_id du groupe pour publier le retour final
+        context.user_data['group_chat_id'] = query.message.chat_id
         await query.edit_message_reply_markup(reply_markup=None)  # Retirer les boutons temporairement
         await update_status_message(context, "👤 Naam van klant :")
         return COLLECTING_NOM_CLIENT
@@ -1030,6 +1042,15 @@ async def collect_extra_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not check_authorization(update):
         return ConversationHandler.END
     
+    # Obtenir user_id pour les messages privés
+    user_id = update.effective_user.id if update.effective_user else None
+    if not user_id:
+        # Fallback si pas d'utilisateur
+        if update.message:
+            user_id = update.message.from_user.id
+        elif update.callback_query:
+            user_id = update.callback_query.from_user.id
+    
     # Vérifier si c'est un callback (bouton "Passer")
     if update.callback_query and update.callback_query.data == "passer_extra_info":
         extra_info = ""
@@ -1043,12 +1064,12 @@ async def collect_extra_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception:
             pass
     
-    # Supprimer le message de statut
+    # Supprimer le message de statut (en privé)
     message_id = context.user_data.get('status_message_id')
-    chat_id = context.user_data.get('status_chat_id')
-    if message_id and chat_id:
+    status_user_id = context.user_data.get('status_user_id')
+    if message_id and status_user_id:
         try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+            await context.bot.delete_message(chat_id=status_user_id, message_id=message_id)
         except Exception:
             pass
     
@@ -1056,64 +1077,68 @@ async def collect_extra_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
     retour = context.user_data['retour']
     
     try:
-        # Utiliser le chat_id du message actuel (n'importe quel groupe)
-        chat_id = update.message.chat_id if update.message else update.callback_query.message.chat_id
-        # Enregistrer dans la base de données d'abord (date = "Non définie" pour compatibilité)
-        # Note: On va créer un message temporaire puis le mettre à jour avec la date de création
+        # Obtenir le chat_id du groupe depuis context ou depuis le message/callback
+        group_chat_id = context.user_data.get('group_chat_id')
+        if not group_chat_id:
+            if update.message:
+                group_chat_id = update.message.chat_id
+            elif update.callback_query:
+                group_chat_id = update.callback_query.message.chat_id
+        
+        if not group_chat_id:
+            raise ValueError("Impossible de déterminer le chat_id du groupe")
+        
+        # Enregistrer dans la base de données d'abord
         temp_message = await context.bot.send_message(
-            chat_id=chat_id,
+            chat_id=group_chat_id,  # Dans le groupe
             text="⏳ Bezig met toevoegen...",
             reply_markup=get_retour_keyboard("en_attente")
         )
         
-        # Description vide maintenant, extra_info stocké dans description pour compatibilité
-        # (ou on pourrait ajouter une colonne extra_info à la DB plus tard)
         extra_info_value = retour.get('extra_info', '')
-        description_value = extra_info_value  # Stocker extra_info dans description pour l'instant
+        description_value = extra_info_value
         
         add_retour_to_db(
             temp_message.message_id,
-            chat_id,  # Stocker le chat_id pour séparer par groupe
+            group_chat_id,
             retour['nom'],
             retour['adresse'],
-            description_value,  # Utiliser extra_info comme description
+            description_value,
             retour['materiel'],
             "Non définie"
         )
         
-        # Récupérer le retour depuis la BDD pour avoir la date de création
-        retour_db = get_retour_by_message_id(temp_message.message_id, chat_id)
+        retour_db = get_retour_by_message_id(temp_message.message_id, group_chat_id)
         date_creation = retour_db[8] if retour_db and len(retour_db) > 8 else None
         
-        # Formater le message avec la date de création
         message_text = format_retour_message(
             retour['nom'],
             retour['adresse'],
             "",  # Description vide maintenant
             retour['materiel'],
-            "en_attente",  # Statut par défaut
+            "en_attente",
             date_creation,
-            extra_info_value  # Passer extra_info
+            extra_info_value
         )
         
-        # Mettre à jour le message avec le texte final
+        # Mettre à jour le message dans le groupe
         sent_message = await context.bot.edit_message_text(
-            chat_id=chat_id,
+            chat_id=group_chat_id,
             message_id=temp_message.message_id,
             text=message_text,
             reply_markup=get_retour_keyboard("en_attente")
         )
-        target_chat_id = update.message.chat_id if update.message else update.callback_query.message.chat_id
+        
+        # Envoyer la confirmation en privé à l'utilisateur
         await context.bot.send_message(
-            chat_id=target_chat_id,
+            chat_id=user_id,  # En privé
             text="✅ Afwerking toegevoegd aan de groep.",
             reply_markup=get_menu_keyboard()
         )
     except Exception as e:
         logger.error(f"Erreur envoi message: {e}")
-        target_chat_id = update.message.chat_id if update.message else update.callback_query.message.chat_id
         await context.bot.send_message(
-            chat_id=target_chat_id,
+            chat_id=user_id,  # En privé
             text="❌ Fout bij het toevoegen van de afwerking.",
             reply_markup=get_menu_keyboard()
         )
@@ -1132,8 +1157,14 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
     chat_id = context.user_data.get('chat_id_editing')
     retour_data = context.user_data.get('retour_data', {})
     
+    user_id = update.effective_user.id if update.effective_user else update.message.from_user.id
+    
     if not message_id or not chat_id or not retour_data:
-        await update.message.reply_text("❌ Fout: bewerkingsgegevens niet gevonden.", reply_markup=get_menu_keyboard())
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="❌ Fout: bewerkingsgegevens niet gevonden.",
+            reply_markup=get_menu_keyboard()
+        )
         context.user_data.clear()
         return ConversationHandler.END
     
@@ -1147,7 +1178,11 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     db_field = field_mapping.get(modif_type)
     if not db_field:
-        await update.message.reply_text("❌ Fout: ongeldig bewerkingstype.", reply_markup=get_menu_keyboard())
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="❌ Fout: ongeldig bewerkingstype.",
+            reply_markup=get_menu_keyboard()
+        )
         context.user_data.clear()
         return ConversationHandler.END
     
@@ -1195,7 +1230,7 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=get_retour_keyboard(statut_actuel)
         )
         
-        # Confirmer à l'utilisateur
+        # Confirmer à l'utilisateur en privé
         field_names = {
             'nom': 'Naam',
             'adresse': 'Adres',
@@ -1203,10 +1238,18 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
             'materiel': 'Materiaal'
         }
         field_name = field_names.get(modif_type, 'Veld')
-        await update.message.reply_text(f"✅ {field_name} bijgewerkt.", reply_markup=get_menu_keyboard())
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"✅ {field_name} bijgewerkt.",
+            reply_markup=get_menu_keyboard()
+        )
     except Exception as e:
         logger.error(f"Erreur modification: {e}")
-        await update.message.reply_text("❌ Fout bij het bewerken.", reply_markup=get_menu_keyboard())
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="❌ Fout bij het bewerken.",
+            reply_markup=get_menu_keyboard()
+        )
     
     context.user_data.clear()
     return ConversationHandler.END
@@ -1216,8 +1259,13 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not check_authorization(update):
         return ConversationHandler.END
     
+    user_id = update.effective_user.id if update.effective_user else update.message.from_user.id
     context.user_data.clear()
-    await update.message.reply_text("❌ Operatie geannuleerd.", reply_markup=get_menu_keyboard())
+    await context.bot.send_message(
+        chat_id=user_id,
+        text="❌ Operatie geannuleerd.",
+        reply_markup=get_menu_keyboard()
+    )
     return ConversationHandler.END
 
 # ==================== MAIN ====================
