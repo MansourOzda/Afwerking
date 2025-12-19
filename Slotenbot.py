@@ -926,6 +926,8 @@ def main() -> None:
     application = Application.builder().token(BOT_TOKEN).build()
     
     # ConversationHandler pour la gestion des retours
+    # conversation_timeout: expire automatiquement après 10 minutes d'inactivité
+    # Cela évite l'accumulation de données dans user_data et libère les ressources
     conv_handler = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(button_handler, pattern="^ajouter_retour$"),
@@ -956,7 +958,8 @@ def main() -> None:
             CommandHandler("cancel", cancel),
             CommandHandler("start", start)
         ],
-        allow_reentry=True
+        allow_reentry=True,
+        conversation_timeout=600.0  # 10 minutes d'inactivité = expiration automatique
     )
     
     # Handler d'erreurs global
