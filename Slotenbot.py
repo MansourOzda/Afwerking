@@ -807,10 +807,20 @@ async def voir_retours_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.error(f"Erreur édition message voir_retours: {e}")
         await query.message.reply_text(message, reply_markup=pagination_keyboard, parse_mode='Markdown')
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler pour la commande /start"""
+async def afwerken(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler pour la commande /afwerken"""
     if not check_authorization(update):
         return
+    
+    # Nettoyer les données et supprimer le message de statut s'il existe
+    message_id = context.user_data.get('status_message_id')
+    chat_id = context.user_data.get('status_chat_id')
+    
+    if message_id and chat_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except Exception:
+            pass  # Le message peut déjà être supprimé
     
     context.user_data.clear()
     
@@ -1257,7 +1267,7 @@ def main() -> None:
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
-            CommandHandler("start", start)
+            CommandHandler("afwerken", afwerken)
         ],
         allow_reentry=True,
         conversation_timeout=600.0  # 10 minutes d'inactivité = expiration automatique
@@ -1277,7 +1287,7 @@ def main() -> None:
                 # Si on ne peut pas envoyer de message, on log juste l'erreur
                 pass
     
-    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("afwerken", afwerken))
     # Handler séparé pour "noop" (boutons non-cliquables, doit être avant ConversationHandler)
     async def noop_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
