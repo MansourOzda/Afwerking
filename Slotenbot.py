@@ -575,10 +575,16 @@ async def changer_statut_handler(update: Update, context: ContextTypes.DEFAULT_T
         message = "🔄 **Statut wijzigen**\n\n"
         message += "Geen afwerkingen geregistreerd op dit moment."
         try:
-            await query.edit_message_text(message, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
+            if query:
+                await query.edit_message_text(message, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
+            else:
+                await context.bot.send_message(chat_id=chat_id, text=message, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
         except Exception as e:
             logger.error(f"Erreur édition message changer_statut: {e}")
-            await query.message.reply_text(message, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
+            if query:
+                await query.message.reply_text(message, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
+            else:
+                await context.bot.send_message(chat_id=chat_id, text=message, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
         return
     
     # Formater la liste des retours de la page
@@ -602,10 +608,17 @@ async def changer_statut_handler(update: Update, context: ContextTypes.DEFAULT_T
     statut_keyboard = get_liste_statut_keyboard(retours, page, total_pages, chat_id)
     
     try:
-        await query.edit_message_text(message, reply_markup=statut_keyboard, parse_mode='Markdown')
+        if query:
+            await query.edit_message_text(message, reply_markup=statut_keyboard, parse_mode='Markdown')
+        else:
+            # Ne devrait pas arriver, mais au cas où
+            await context.bot.send_message(chat_id=chat_id, text=message, reply_markup=statut_keyboard, parse_mode='Markdown')
     except Exception as e:
         logger.error(f"Erreur édition message changer_statut: {e}")
-        await query.message.reply_text(message, reply_markup=statut_keyboard, parse_mode='Markdown')
+        if query:
+            await query.message.reply_text(message, reply_markup=statut_keyboard, parse_mode='Markdown')
+        else:
+            await context.bot.send_message(chat_id=chat_id, text=message, reply_markup=statut_keyboard, parse_mode='Markdown')
 
 async def changer_statut_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler pour changer le statut d'un retour sélectionné depuis la liste"""
@@ -681,12 +694,42 @@ async def changer_statut_select_handler(update: Update, context: ContextTypes.DE
                 reply_markup=get_retour_keyboard(statut_final)
             )
             
-            # Confirmer à l'utilisateur
-            status_text = "Gedaan" if statut_final == "fait" else "In afwachting"
-            await query.answer(f"✅ Status gewijzigd naar: {status_text}")
-            
             # Retourner à la liste (raffraîchir) en conservant la page actuelle
-            await changer_statut_handler(update, context, current_page)
+            # On passe skip_answer=True pour ne pas répondre deux fois au callback
+            status_text = "Gedaan" if statut_final == "fait" else "In afwachting"
+            
+            # Créer un nouvel Update avec le même query pour rafraîchir
+            # On va directement éditer le message avec les nouvelles données
+            current_chat_id = query.message.chat_id
+            retours_refresh, total_refresh, total_pages_refresh = get_retours_paginated(current_chat_id, current_page, per_page=10)
+            
+            if retours_refresh:
+                message_refresh = "🔄 **Statut wijzigen**\n\n"
+                message_refresh += "Kies een afwerking om de status te wijzigen:\n\n"
+                
+                start_idx_refresh = current_page * 10 + 1
+                for idx, retour in enumerate(retours_refresh):
+                    statut_refresh = get_statut_from_retour(retour)
+                    status_emoji_refresh = "✅" if statut_refresh == "fait" else "⏳"
+                    status_text_refresh = "Gedaan" if statut_refresh == "fait" else "In afwachting"
+                    
+                    global_idx_refresh = start_idx_refresh + idx
+                    message_refresh += f"**{global_idx_refresh}. {retour[3]}** {status_emoji_refresh}\n"
+                    message_refresh += f"📍 {retour[4]}\n"
+                    message_refresh += f"Status: {status_text_refresh}\n\n"
+                
+                message_refresh += f"_Totaal: {total_refresh} afwerking(en) - Pagina {current_page+1}/{total_pages_refresh}_"
+                
+                statut_keyboard_refresh = get_liste_statut_keyboard(retours_refresh, current_page, total_pages_refresh, current_chat_id)
+                
+                try:
+                    await query.edit_message_text(message_refresh, reply_markup=statut_keyboard_refresh, parse_mode='Markdown')
+                    await query.answer(f"✅ Status gewijzigd naar: {status_text}")
+                except Exception as e:
+                    logger.error(f"Erreur rafraîchissement liste statut: {e}")
+                    await query.answer(f"✅ Status gewijzigd naar: {status_text}")
+            else:
+                await query.answer(f"✅ Status gewijzigd naar: {status_text}")
             
         except Exception as e:
             logger.error(f"Erreur mise à jour statut: {e}")
