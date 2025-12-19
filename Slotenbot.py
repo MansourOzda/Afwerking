@@ -16,6 +16,7 @@ Le fichier de base de données 'retours_intervention.db' sera créé automatique
 import logging
 import os
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple
 
@@ -64,14 +65,24 @@ DB_NAME = DB_PATH
 
 # ==================== BASE DE DONNÉES ====================
 
-def init_database():
-    """Initialise la base de données SQLite"""
+@contextmanager
+def get_db_connection():
+    """Context manager pour la connexion à la base de données avec fermeture garantie"""
     # Créer le répertoire parent si nécessaire (pour le volume Railway /data)
     if os.path.dirname(DB_NAME):
         os.makedirs(os.path.dirname(DB_NAME), exist_ok=True)
     
     conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    conn.row_factory = sqlite3.Row  # Permet l'accès par nom de colonne
+    try:
+        yield conn
+    finally:
+        conn.close()  # Fermeture garantie même en cas d'erreur
+
+def init_database():
+    """Initialise la base de données SQLite"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS retours (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,20 +109,18 @@ def init_database():
         conn.commit()
     except sqlite3.OperationalError:
         pass
-    
-    conn.commit()
-    conn.close()
+        # La connexion se ferme automatiquement grâce au context manager
 
 def add_retour_to_db(message_id: int, chat_id: int, nom: str, adresse: str, description: str, materiel: str, date: str):
     """Ajoute un retour à la base de données"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO retours (message_id, chat_id, nom_client, adresse, description, materiel, date, statut)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (message_id, chat_id, nom, adresse, description, materiel, date, "en_attente"))
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO retours (message_id, chat_id, nom_client, adresse, description, materiel, date, statut)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (message_id, chat_id, nom, adresse, description, materiel, date, "en_attente"))
+        conn.commit()
+        # La connexion se ferme automatiquement grâce au context manager
 
 def update_retour_in_db(message_id: int, chat_id: int, field: str, value: str):
     """Met à jour un champ d'un retour dans la base de données (spécifique au groupe)"""
@@ -120,66 +129,66 @@ def update_retour_in_db(message_id: int, chat_id: int, field: str, value: str):
     if field not in ALLOWED_FIELDS:
         raise ValueError(f"Champ non autorisé: {field}. Champs autorisés: {', '.join(ALLOWED_FIELDS)}")
     
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    # Construire la requête de manière sécurisée avec validation du champ
-    query = f'UPDATE retours SET {field} = ? WHERE message_id = ? AND chat_id = ?'
-    cursor.execute(query, (value, message_id, chat_id))
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        # Construire la requête de manière sécurisée avec validation du champ
+        query = f'UPDATE retours SET {field} = ? WHERE message_id = ? AND chat_id = ?'
+        cursor.execute(query, (value, message_id, chat_id))
+        conn.commit()
+        # La connexion se ferme automatiquement grâce au context manager
 
 def delete_retour_from_db(message_id: int, chat_id: int):
     """Supprime un retour de la base de données (spécifique au groupe)"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM retours WHERE message_id = ? AND chat_id = ?', (message_id, chat_id))
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM retours WHERE message_id = ? AND chat_id = ?', (message_id, chat_id))
+        conn.commit()
+        # La connexion se ferme automatiquement grâce au context manager
 
-def get_all_retours(chat_id: int) -> List[Tuple]:
+def get_all_retours(chat_id: int) -> List[sqlite3.Row]:
     """Récupère tous les retours d'un groupe spécifique"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM retours WHERE chat_id = ? ORDER BY date_creation DESC', (chat_id,))
-    retours = cursor.fetchall()
-    conn.close()
-    return retours
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM retours WHERE chat_id = ? ORDER BY date_creation DESC', (chat_id,))
+        retours = cursor.fetchall()
+        # Convertir les Row en list pour compatibilité avec le code existant
+        return list(retours)
 
 def get_retours_paginated(chat_id: int, page: int = 0, per_page: int = 10) -> tuple:
     """Récupère les retours paginés"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    offset = page * per_page
-    
-    # Récupérer le total
-    cursor.execute('SELECT COUNT(*) FROM retours WHERE chat_id = ?', (chat_id,))
-    total = cursor.fetchone()[0]
-    
-    # Récupérer la page
-    cursor.execute('SELECT * FROM retours WHERE chat_id = ? ORDER BY date_creation DESC LIMIT ? OFFSET ?', 
-                   (chat_id, per_page, offset))
-    retours = cursor.fetchall()
-    conn.close()
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        offset = page * per_page
+        
+        # Récupérer le total
+        cursor.execute('SELECT COUNT(*) FROM retours WHERE chat_id = ?', (chat_id,))
+        total = cursor.fetchone()[0]
+        
+        # Récupérer la page
+        cursor.execute('SELECT * FROM retours WHERE chat_id = ? ORDER BY date_creation DESC LIMIT ? OFFSET ?', 
+                       (chat_id, per_page, offset))
+        retours = cursor.fetchall()
+        # Convertir les Row en list pour compatibilité
+        retours_list = list(retours)
     
     total_pages = (total + per_page - 1) // per_page if total > 0 else 0
-    return retours, total, total_pages
+    return retours_list, total, total_pages
 
 def update_statut_in_db(message_id: int, chat_id: int, statut: str):
     """Met à jour le statut d'un retour"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute('UPDATE retours SET statut = ? WHERE message_id = ? AND chat_id = ?', (statut, message_id, chat_id))
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('UPDATE retours SET statut = ? WHERE message_id = ? AND chat_id = ?', (statut, message_id, chat_id))
+        conn.commit()
+        # La connexion se ferme automatiquement grâce au context manager
 
-def get_retour_by_message_id(message_id: int, chat_id: int) -> Optional[Tuple]:
+def get_retour_by_message_id(message_id: int, chat_id: int) -> Optional[sqlite3.Row]:
     """Récupère un retour par son message_id et chat_id"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM retours WHERE message_id = ? AND chat_id = ?', (message_id, chat_id))
-    retour = cursor.fetchone()
-    conn.close()
-    return retour
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM retours WHERE message_id = ? AND chat_id = ?', (message_id, chat_id))
+        retour = cursor.fetchone()
+        return retour
 
 def get_statut_from_retour(retour: Tuple) -> str:
     """Extrait le statut d'un retour (index 9 dans le tuple)"""
