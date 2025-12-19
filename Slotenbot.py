@@ -83,32 +83,32 @@ def init_database():
     """Initialise la base de données SQLite"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS retours (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            message_id INTEGER NOT NULL,
-            chat_id INTEGER NOT NULL,
-            nom_client TEXT NOT NULL,
-            adresse TEXT NOT NULL,
-            description TEXT NOT NULL,
-            materiel TEXT NOT NULL,
-            date TEXT NOT NULL,
-            date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(message_id, chat_id)
-        )
-    ''')
-    # Migrations pour bases existantes
-    try:
-        cursor.execute('ALTER TABLE retours ADD COLUMN chat_id INTEGER')
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
-    
-    try:
-        cursor.execute('ALTER TABLE retours ADD COLUMN statut TEXT DEFAULT "en_attente"')
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS retours (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                nom_client TEXT NOT NULL,
+                adresse TEXT NOT NULL,
+                description TEXT NOT NULL,
+                materiel TEXT NOT NULL,
+                date TEXT NOT NULL,
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(message_id, chat_id)
+            )
+        ''')
+        # Migrations pour bases existantes
+        try:
+            cursor.execute('ALTER TABLE retours ADD COLUMN chat_id INTEGER')
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cursor.execute('ALTER TABLE retours ADD COLUMN statut TEXT DEFAULT "en_attente"')
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
         # La connexion se ferme automatiquement grâce au context manager
 
 def add_retour_to_db(message_id: int, chat_id: int, nom: str, adresse: str, description: str, materiel: str, date: str):
