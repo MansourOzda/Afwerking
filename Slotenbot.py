@@ -222,8 +222,28 @@ def escape_markdown(text: str) -> str:
         text = text.replace(char, f'\\{char}')
     return text
 
+def format_date_creation(date_creation_str: Optional[str]) -> str:
+    """Formate la date de création de manière lisible"""
+    if not date_creation_str:
+        return "Onbekend"
+    
+    try:
+        # Parser la date depuis le format SQLite (YYYY-MM-DD HH:MM:SS)
+        if isinstance(date_creation_str, str):
+            dt = datetime.strptime(date_creation_str.split('.')[0], '%Y-%m-%d %H:%M:%S')
+        else:
+            dt = date_creation_str
+        
+        # Formater en néerlandais : "19 dec 2024 om 14:30"
+        mois_nl = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec']
+        mois = mois_nl[dt.month - 1]
+        return f"{dt.day} {mois} {dt.year} om {dt.hour:02d}:{dt.minute:02d}"
+    except (ValueError, AttributeError, IndexError):
+        return str(date_creation_str) if date_creation_str else "Onbekend"
+
 def format_retour_message(nom: str, adresse: str, description: str, 
-                         materiel: str, statut: str = "en_attente") -> str:
+                         materiel: str, statut: str = "en_attente", 
+                         date_creation: Optional[str] = None) -> str:
     """Formate le message de retour d'intervention"""
     status_emoji = "✅" if statut == "fait" else "⏳"
     status_text = "Gedaan" if statut == "fait" else "In afwachting"
@@ -233,7 +253,12 @@ def format_retour_message(nom: str, adresse: str, description: str,
     message += f"Adres : {adresse}\n"
     message += f"Te doen : {description}\n"
     message += f"Materiaal : {materiel}\n"
-    message += f"{status_emoji} Status : {status_text}"
+    message += f"{status_emoji} Status : {status_text}\n"
+    
+    # Ajouter la date de création si disponible
+    date_formatee = format_date_creation(date_creation)
+    message += f"📅 Gemaakt op : {date_formatee}"
+    
     return message
 
 def parse_retour_message(message_text: str) -> Dict[str, str]:
@@ -599,12 +624,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         retour = get_retour_by_message_id(message_id, chat_id)
         if retour:
             statut_actuel = get_statut_from_retour(retour)
+            date_creation = retour[8] if len(retour) > 8 else None  # date_creation à l'index 8
             new_text = format_retour_message(
                 retour[3],  # nom
                 retour[4],  # adresse
                 retour[5],  # description
                 retour[6],  # materiel
-                statut_actuel
+                statut_actuel,
+                date_creation
             )
             await query.edit_message_text(new_text, reply_markup=get_retour_keyboard(statut_actuel))
             await query.answer("✅ Status bijgewerkt")
@@ -699,31 +726,48 @@ async def collect_materiel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     # Publier le retour dans le groupe
     retour = context.user_data['retour']
-    message_text = format_retour_message(
-        retour['nom'],
-        retour['adresse'],
-        retour['description'],
-        retour['materiel'],
-        "en_attente"  # Statut par défaut
-    )
     
     try:
         # Utiliser le chat_id du message actuel (n'importe quel groupe)
         chat_id = update.message.chat_id
-        sent_message = await context.bot.send_message(
+        # Enregistrer dans la base de données d'abord (date = "Non définie" pour compatibilité)
+        # Note: On va créer un message temporaire puis le mettre à jour avec la date de création
+        temp_message = await context.bot.send_message(
             chat_id=chat_id,
-            text=message_text,
+            text="⏳ Bezig met toevoegen...",
             reply_markup=get_retour_keyboard("en_attente")
         )
-        # Enregistrer dans la base de données (date = "Non définie" pour compatibilité)
+        
         add_retour_to_db(
-            sent_message.message_id,
+            temp_message.message_id,
             chat_id,  # Stocker le chat_id pour séparer par groupe
             retour['nom'],
             retour['adresse'],
             retour['description'],
             retour['materiel'],
             "Non définie"
+        )
+        
+        # Récupérer le retour depuis la BDD pour avoir la date de création
+        retour_db = get_retour_by_message_id(temp_message.message_id, chat_id)
+        date_creation = retour_db[8] if retour_db and len(retour_db) > 8 else None
+        
+        # Formater le message avec la date de création
+        message_text = format_retour_message(
+            retour['nom'],
+            retour['adresse'],
+            retour['description'],
+            retour['materiel'],
+            "en_attente",  # Statut par défaut
+            date_creation
+        )
+        
+        # Mettre à jour le message avec le texte final
+        sent_message = await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=temp_message.message_id,
+            text=message_text,
+            reply_markup=get_retour_keyboard("en_attente")
         )
         await context.bot.send_message(
             chat_id=update.message.chat_id,
@@ -777,11 +821,13 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Récupérer toutes les données mises à jour depuis la BDD
     retour_db = get_retour_by_message_id(message_id, chat_id)
     if retour_db:
-        # retour_db: (id, message_id, chat_id, nom_client, adresse, description, materiel, date, date_creation)
+        # retour_db: (id, message_id, chat_id, nom_client, adresse, description, materiel, date, date_creation, statut)
         nom = retour_db[3]
         adresse = retour_db[4]
         description = retour_db[5]
         materiel = retour_db[6]
+        date_creation = retour_db[8] if len(retour_db) > 8 else None
+        statut_actuel = get_statut_from_retour(retour_db)
     else:
         # Fallback sur les données locales si la BDD échoue
         if modif_type == 'nom':
@@ -797,13 +843,11 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
         adresse = retour_data.get('adresse', 'N/A')
         description = retour_data.get('description', 'N/A')
         materiel = retour_data.get('materiel', 'N/A')
+        date_creation = None
+        statut_actuel = "en_attente"
     
     try:
-        # Récupérer le statut actuel du retour
-        retour_db = get_retour_by_message_id(message_id, chat_id)
-        statut_actuel = get_statut_from_retour(retour_db) if retour_db else "en_attente"
-        
-        new_text = format_retour_message(nom, adresse, description, materiel, statut_actuel)
+        new_text = format_retour_message(nom, adresse, description, materiel, statut_actuel, date_creation)
         
         # Éditer le message dans le groupe (utiliser le chat_id stocké)
         await context.bot.edit_message_text(
