@@ -80,13 +80,19 @@ def init_database():
             UNIQUE(message_id, chat_id)
         )
     ''')
-    # Ajouter la colonne chat_id si elle n'existe pas (migration pour bases existantes)
+    # Migrations pour bases existantes
     try:
         cursor.execute('ALTER TABLE retours ADD COLUMN chat_id INTEGER')
         conn.commit()
     except sqlite3.OperationalError:
-        # La colonne existe déjà, pas de problème
         pass
+    
+    try:
+        cursor.execute('ALTER TABLE retours ADD COLUMN statut TEXT DEFAULT "en_attente"')
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    
     conn.commit()
     conn.close()
 
@@ -95,9 +101,9 @@ def add_retour_to_db(message_id: int, chat_id: int, nom: str, adresse: str, desc
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO retours (message_id, chat_id, nom_client, adresse, description, materiel, date)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (message_id, chat_id, nom, adresse, description, materiel, date))
+        INSERT INTO retours (message_id, chat_id, nom_client, adresse, description, materiel, date, statut)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (message_id, chat_id, nom, adresse, description, materiel, date, "en_attente"))
     conn.commit()
     conn.close()
 
@@ -133,6 +139,33 @@ def get_all_retours(chat_id: int) -> List[Tuple]:
     conn.close()
     return retours
 
+def get_retours_paginated(chat_id: int, page: int = 0, per_page: int = 10) -> tuple:
+    """Récupère les retours paginés"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    offset = page * per_page
+    
+    # Récupérer le total
+    cursor.execute('SELECT COUNT(*) FROM retours WHERE chat_id = ?', (chat_id,))
+    total = cursor.fetchone()[0]
+    
+    # Récupérer la page
+    cursor.execute('SELECT * FROM retours WHERE chat_id = ? ORDER BY date_creation DESC LIMIT ? OFFSET ?', 
+                   (chat_id, per_page, offset))
+    retours = cursor.fetchall()
+    conn.close()
+    
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 0
+    return retours, total, total_pages
+
+def update_statut_in_db(message_id: int, chat_id: int, statut: str):
+    """Met à jour le statut d'un retour"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('UPDATE retours SET statut = ? WHERE message_id = ? AND chat_id = ?', (statut, message_id, chat_id))
+    conn.commit()
+    conn.close()
+
 def get_retour_by_message_id(message_id: int, chat_id: int) -> Optional[Tuple]:
     """Récupère un retour par son message_id et chat_id"""
     conn = sqlite3.connect(DB_NAME)
@@ -141,6 +174,12 @@ def get_retour_by_message_id(message_id: int, chat_id: int) -> Optional[Tuple]:
     retour = cursor.fetchone()
     conn.close()
     return retour
+
+def get_statut_from_retour(retour: Tuple) -> str:
+    """Extrait le statut d'un retour (index 9 dans le tuple)"""
+    if len(retour) > 9 and retour[9]:
+        return retour[9]
+    return "en_attente"
 
 # ==================== CONSTANTES ====================
 
@@ -178,13 +217,17 @@ def check_authorization(update: Update) -> bool:
 # ==================== FONCTIONS UTILITAIRES ====================
 
 def format_retour_message(nom: str, adresse: str, description: str, 
-                         materiel: str) -> str:
+                         materiel: str, statut: str = "en_attente") -> str:
     """Formate le message de retour d'intervention"""
+    status_emoji = "✅" if statut == "fait" else "⏳"
+    status_text = "Gedaan" if statut == "fait" else "In afwachting"
+    
     message = "🔁 AFWERKING\n\n"
     message += f"Klant : {nom}\n"
     message += f"Adres : {adresse}\n"
     message += f"Te doen : {description}\n"
-    message += f"Materiaal : {materiel}"
+    message += f"Materiaal : {materiel}\n"
+    message += f"{status_emoji} Status : {status_text}"
     return message
 
 def parse_retour_message(message_text: str) -> Dict[str, str]:
@@ -206,12 +249,35 @@ def parse_retour_message(message_text: str) -> Dict[str, str]:
         logger.error(f"Erreur parsing message: {e}")
     return data
 
-def get_retour_keyboard() -> InlineKeyboardMarkup:
-    """Retourne le clavier pour un retour (modifier/supprimer)"""
+def get_retour_keyboard(statut: str = "en_attente") -> InlineKeyboardMarkup:
+    """Retourne le clavier pour un retour (modifier/supprimer/changer statut)"""
+    status_button_text = "✅ Markeren als gedaan" if statut == "en_attente" else "⏳ Markeren als in afwachting"
+    status_callback = "statut_fait" if statut == "en_attente" else "statut_attente"
+    
     keyboard = [
         [InlineKeyboardButton("✏️ Bewerken", callback_data="modifier_retour")],
+        [InlineKeyboardButton(status_button_text, callback_data=status_callback)],
         [InlineKeyboardButton("🗑 Verwijderen", callback_data="supprimer_retour")]
     ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_pagination_keyboard(page: int, total_pages: int, base_callback: str = "voir_retours_page") -> InlineKeyboardMarkup:
+    """Retourne le clavier de pagination"""
+    keyboard = []
+    
+    if total_pages > 1:
+        row = []
+        if page > 0:
+            row.append(InlineKeyboardButton("◀️ Vorige", callback_data=f"{base_callback}_{page-1}"))
+        if page < total_pages - 1:
+            row.append(InlineKeyboardButton("Volgende ▶️", callback_data=f"{base_callback}_{page+1}"))
+        if row:
+            keyboard.append(row)
+        
+        keyboard.append([InlineKeyboardButton(f"Pagina {page+1}/{total_pages}", callback_data="noop")])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Terug naar menu", callback_data="menu_principal")])
+    
     return InlineKeyboardMarkup(keyboard)
 
 def get_menu_keyboard() -> InlineKeyboardMarkup:
@@ -288,17 +354,27 @@ async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_ques
     except Exception as e:
         logger.error(f"Erreur mise à jour message statut: {e}")
 
-async def voir_retours_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler séparé pour le bouton 'Voir les retours'"""
+async def voir_retours_page_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler pour la pagination des retours"""
+    query = update.callback_query
+    if query and query.data:
+        try:
+            page = int(query.data.split("_")[-1])
+            await voir_retours_handler(update, context, page)
+        except (ValueError, IndexError):
+            await query.answer("❌ Ongeldige pagina", show_alert=True)
+
+async def voir_retours_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0) -> None:
+    """Handler séparé pour le bouton 'Voir les retours' avec pagination"""
     query = update.callback_query
     await query.answer()
     
     if not check_authorization(update):
         return
     
-    # Récupérer tous les retours du groupe actuel depuis la base de données
+    # Récupérer les retours paginés du groupe actuel depuis la base de données
     chat_id = query.message.chat_id
-    retours = get_all_retours(chat_id)
+    retours, total, total_pages = get_retours_paginated(chat_id, page, per_page=10)
     
     if not retours:
         message = "📋 **Lijst van afwerkingen**\n\n"
@@ -310,42 +386,33 @@ async def voir_retours_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.message.reply_text(message, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
         return
     
-    # Formater la liste des retours
+    # Formater la liste des retours de la page
     message = "📋 **Lijst van afwerkingen**\n\n"
     
-    for idx, retour in enumerate(retours, 1):
-        # retour est un tuple: (id, message_id, chat_id, nom_client, adresse, description, materiel, date, date_creation)
-        message += f"**{idx}. {retour[3]}**\n"
+    start_idx = page * 10 + 1
+    for idx, retour in enumerate(retours):
+        # retour est un tuple: (id, message_id, chat_id, nom_client, adresse, description, materiel, date, date_creation, statut)
+        statut = get_statut_from_retour(retour)
+        status_emoji = "✅" if statut == "fait" else "⏳"
+        status_text = "Gedaan" if statut == "fait" else "In afwachting"
+        
+        global_idx = start_idx + idx
+        message += f"**{global_idx}. {retour[3]}** {status_emoji}\n"
         message += f"📍 {retour[4]}\n"
         message += f"🔧 {retour[5][:50]}{'...' if len(retour[5]) > 50 else ''}\n"
-        message += f"📦 {retour[6]}\n\n"
+        message += f"📦 {retour[6]}\n"
+        message += f"Status: {status_text}\n\n"
     
-    message += f"_Totaal: {len(retours)} afwerking(en)_"
+    message += f"_Totaal: {total} afwerking(en) - Pagina {page+1}/{total_pages}_"
     
-    # Si le message est trop long, le diviser en plusieurs messages
-    if len(message) > 4000:  # Limite Telegram ~4096 caractères
-        # Envoyer le premier message avec les premiers retours
-        first_part = "📋 **Lijst van afwerkingen**\n\n"
-        remaining_chars = 4000 - len(first_part) - 100  # Marge de sécurité
-        
-        current_msg = first_part
-        for idx, retour in enumerate(retours, 1):
-            retour_text = f"**{idx}. {retour[3]}**\n📍 {retour[4]}\n🔧 {retour[5][:50]}{'...' if len(retour[5]) > 50 else ''}\n📦 {retour[6]}\n\n"
-            if len(current_msg) + len(retour_text) > remaining_chars:
-                break
-            current_msg += retour_text
-        
-        try:
-            await query.edit_message_text(current_msg, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
-        except Exception as e:
-            logger.error(f"Erreur édition message voir_retours: {e}")
-            await query.message.reply_text(current_msg, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
-    else:
-        try:
-            await query.edit_message_text(message, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
-        except Exception as e:
-            logger.error(f"Erreur édition message voir_retours: {e}")
-            await query.message.reply_text(message, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
+    # Clavier avec pagination
+    pagination_keyboard = get_pagination_keyboard(page, total_pages)
+    
+    try:
+        await query.edit_message_text(message, reply_markup=pagination_keyboard, parse_mode='Markdown')
+    except Exception as e:
+        logger.error(f"Erreur édition message voir_retours: {e}")
+        await query.message.reply_text(message, reply_markup=pagination_keyboard, parse_mode='Markdown')
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler pour la commande /start"""
@@ -395,18 +462,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Si pas dans la BDD, parser le message (rétrocompatibilité)
             message_text = query.message.text
             retour_data = parse_retour_message(message_text)
+            statut = "en_attente"  # Par défaut si pas en BDD
         else:
-            # retour_db: (id, message_id, chat_id, nom_client, adresse, description, materiel, date, date_creation)
+            # retour_db: (id, message_id, chat_id, nom_client, adresse, description, materiel, date, date_creation, statut)
             retour_data = {
                 'nom': retour_db[3],
                 'adresse': retour_db[4],
                 'description': retour_db[5],
                 'materiel': retour_db[6]
             }
+            statut = get_statut_from_retour(retour_db)
         
         context.user_data['message_id_editing'] = message_id
         context.user_data['chat_id_editing'] = chat_id
         context.user_data['retour_data'] = retour_data
+        context.user_data['statut_editing'] = statut
         
         await query.edit_message_reply_markup(reply_markup=get_modifier_keyboard())
         return SELECTING_ACTION
@@ -470,6 +540,43 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ Verwijdering geannuleerd.", reply_markup=get_menu_keyboard())
         context.user_data.clear()
         return ConversationHandler.END
+    
+    
+    elif data == "statut_fait" or data == "statut_attente":
+        # Changer le statut d'un retour
+        message_id = query.message.message_id
+        chat_id = query.message.chat_id
+        
+        nouveau_statut = "fait" if data == "statut_fait" else "en_attente"
+        update_statut_in_db(message_id, chat_id, nouveau_statut)
+        
+        # Récupérer le retour mis à jour
+        retour = get_retour_by_message_id(message_id, chat_id)
+        if retour:
+            statut_actuel = get_statut_from_retour(retour)
+            new_text = format_retour_message(
+                retour[3],  # nom
+                retour[4],  # adresse
+                retour[5],  # description
+                retour[6],  # materiel
+                statut_actuel
+            )
+            await query.edit_message_text(new_text, reply_markup=get_retour_keyboard(statut_actuel))
+            await query.answer("✅ Status bijgewerkt")
+        else:
+            await query.answer("❌ Afwerking niet gevonden", show_alert=True)
+        return ConversationHandler.END
+    
+    elif data == "menu_principal":
+        # Retour au menu principal
+        welcome_text = "🤖 **Welkom bij de Afwerking Bot**\n\nKies een actie:"
+        await query.edit_message_text(welcome_text, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
+        return ConversationHandler.END
+    
+    elif data == "noop":
+        # Callback pour les boutons non-cliquables (ex: "Pagina X/Y")
+        await query.answer()
+        return SELECTING_ACTION
     
     return SELECTING_ACTION
 
@@ -551,7 +658,8 @@ async def collect_materiel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         retour['nom'],
         retour['adresse'],
         retour['description'],
-        retour['materiel']
+        retour['materiel'],
+        "en_attente"  # Statut par défaut
     )
     
     try:
@@ -560,7 +668,7 @@ async def collect_materiel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         sent_message = await context.bot.send_message(
             chat_id=chat_id,
             text=message_text,
-            reply_markup=get_retour_keyboard()
+            reply_markup=get_retour_keyboard("en_attente")
         )
         # Enregistrer dans la base de données (date = "Non définie" pour compatibilité)
         add_retour_to_db(
@@ -606,6 +714,8 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # Mapper le type de modification au nom de colonne dans la BDD
     field_mapping = {
+        'nom': 'nom_client',
+        'adresse': 'adresse',
         'description': 'description',
         'materiel': 'materiel'
     }
@@ -643,15 +753,19 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
         description = retour_data.get('description', 'N/A')
         materiel = retour_data.get('materiel', 'N/A')
     
-    new_text = format_retour_message(nom, adresse, description, materiel)
-    
     try:
+        # Récupérer le statut actuel du retour
+        retour_db = get_retour_by_message_id(message_id, chat_id)
+        statut_actuel = get_statut_from_retour(retour_db) if retour_db else "en_attente"
+        
+        new_text = format_retour_message(nom, adresse, description, materiel, statut_actuel)
+        
         # Éditer le message dans le groupe (utiliser le chat_id stocké)
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=new_text,
-            reply_markup=get_retour_keyboard()
+            reply_markup=get_retour_keyboard(statut_actuel)
         )
         
         # Confirmer à l'utilisateur
@@ -739,7 +853,9 @@ def main() -> None:
     
     application.add_handler(CommandHandler("start", start))
     # Handler séparé pour "voir_retours" (doit être avant le ConversationHandler)
-    application.add_handler(CallbackQueryHandler(voir_retours_handler, pattern="^voir_retours$"))
+    application.add_handler(CallbackQueryHandler(lambda u, c: voir_retours_handler(u, c, 0), pattern="^voir_retours$"))
+    # Handler pour la pagination
+    application.add_handler(CallbackQueryHandler(voir_retours_page_handler, pattern="^voir_retours_page_"))
     application.add_handler(conv_handler)
     
     # Ajouter le handler d'erreurs global (doit être le dernier)
