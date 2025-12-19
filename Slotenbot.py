@@ -370,8 +370,8 @@ def get_liste_statut_keyboard(retours: List, page: int, total_pages: int, chat_i
         action_text = "→ In afwachting" if statut == "fait" else "→ Gedaan"
         button_text = f"{status_emoji} {nom} {action_text}"
         
-        # Callback data : changer_statut_select_<message_id>
-        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"changer_statut_select_{message_id}")])
+        # Callback data : changer_statut_select_<message_id>_<page> pour garder la page actuelle
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"changer_statut_select_{message_id}_{page}")])
     
     # Pagination si nécessaire
     if total_pages > 1:
@@ -615,12 +615,19 @@ async def changer_statut_select_handler(update: Update, context: ContextTypes.DE
     
     await query.answer()
     
-    # Extraire le message_id depuis le callback_data : changer_statut_select_<message_id>
+    # Extraire le message_id et la page depuis le callback_data : changer_statut_select_<message_id>_<page>
     try:
-        message_id = int(query.data.split("_")[-1])
+        parts = query.data.split("_")
+        message_id = int(parts[-2])  # avant-dernier élément
+        current_page = int(parts[-1])  # dernier élément
     except (ValueError, IndexError):
-        await query.answer("❌ Ongeldige selectie", show_alert=True)
-        return
+        # Fallback pour compatibilité avec ancien format (sans page)
+        try:
+            message_id = int(query.data.split("_")[-1])
+            current_page = 0
+        except (ValueError, IndexError):
+            await query.answer("❌ Ongeldige selectie", show_alert=True)
+            return
     
     # Récupérer le chat_id depuis le message actuel (celui de la liste)
     current_chat_id = query.message.chat_id
@@ -678,8 +685,8 @@ async def changer_statut_select_handler(update: Update, context: ContextTypes.DE
             status_text = "Gedaan" if statut_final == "fait" else "In afwachting"
             await query.answer(f"✅ Status gewijzigd naar: {status_text}")
             
-            # Retourner à la liste (raffraîchir)
-            await changer_statut_handler(update, context, 0)
+            # Retourner à la liste (raffraîchir) en conservant la page actuelle
+            await changer_statut_handler(update, context, current_page)
             
         except Exception as e:
             logger.error(f"Erreur mise à jour statut: {e}")
