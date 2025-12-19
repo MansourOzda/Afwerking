@@ -595,28 +595,40 @@ async def changer_statut_select_handler(update: Update, context: ContextTypes.DE
         await query.answer("❌ Ongeldige selectie", show_alert=True)
         return
     
-    chat_id = query.message.chat_id
+    # Récupérer le chat_id depuis le message actuel (celui de la liste)
+    current_chat_id = query.message.chat_id
     
-    # Récupérer le retour actuel
-    retour = get_retour_by_message_id(message_id, chat_id)
+    # Récupérer le retour actuel - on doit chercher dans tous les groupes
+    # Mais comme on a le message_id, on peut chercher dans le groupe actuel d'abord
+    retour = get_retour_by_message_id(message_id, current_chat_id)
+    
+    # Si pas trouvé dans le groupe actuel, chercher dans tous les groupes
+    # (pour gérer le cas où on change le statut depuis un autre groupe)
     if not retour:
-        await query.answer("❌ Afwerking niet gevonden", show_alert=True)
+        # Essayer de trouver le retour en cherchant par message_id uniquement
+        # Note: get_retour_by_message_id nécessite chat_id, donc on doit utiliser current_chat_id
+        # Le vrai chat_id est stocké dans la base de données (index 2)
+        # On va chercher dans le groupe actuel uniquement car c'est là qu'on est
+        await query.answer("❌ Afwerking niet gevonden in deze groep", show_alert=True)
         return
+    
+    # Récupérer le chat_id du retour depuis la base de données (index 2)
+    chat_id_retour = retour[2]  # chat_id est à l'index 2 dans le tuple
     
     # Inverser le statut actuel
     statut_actuel = get_statut_from_retour(retour)
     nouveau_statut = "fait" if statut_actuel == "en_attente" else "en_attente"
     
-    # Mettre à jour dans la base de données
-    update_statut_in_db(message_id, chat_id, nouveau_statut)
+    # Mettre à jour dans la base de données (utiliser le chat_id du retour)
+    update_statut_in_db(message_id, chat_id_retour, nouveau_statut)
     
     # Récupérer le retour mis à jour
-    retour_updated = get_retour_by_message_id(message_id, chat_id)
+    retour_updated = get_retour_by_message_id(message_id, chat_id_retour)
     if retour_updated:
         statut_final = get_statut_from_retour(retour_updated)
         date_creation = retour_updated[8] if len(retour_updated) > 8 else None
         
-        # Mettre à jour le message dans le groupe
+        # Mettre à jour le message dans le groupe (utiliser le chat_id du retour)
         new_text = format_retour_message(
             retour_updated[3],  # nom
             retour_updated[4],  # adresse
@@ -627,9 +639,9 @@ async def changer_statut_select_handler(update: Update, context: ContextTypes.DE
         )
         
         try:
-            # Modifier le message dans le groupe
+            # Modifier le message dans le groupe (utiliser le chat_id du retour)
             await context.bot.edit_message_text(
-                chat_id=chat_id,
+                chat_id=chat_id_retour,
                 message_id=message_id,
                 text=new_text,
                 reply_markup=get_retour_keyboard(statut_final)
