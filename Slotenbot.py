@@ -448,12 +448,12 @@ def get_cancel_keyboard_with_skip() -> InlineKeyboardMarkup:
 # ==================== HANDLERS ====================
 
 async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_question: str, show_skip: bool = False):
-    """Met à jour le message de statut avec les réponses déjà données (en privé)"""
+    """Met à jour le message de statut avec les réponses déjà données"""
     retour = context.user_data.get('retour', {})
     message_id = context.user_data.get('status_message_id')
-    user_id = context.user_data.get('status_user_id')  # Utiliser user_id au lieu de chat_id
+    chat_id = context.user_data.get('status_chat_id')  # Utiliser chat_id pour le groupe
     
-    if not message_id or not user_id:
+    if not message_id or not chat_id:
         return
     
     status_text = "📝 **Afwerking toevoegen**\n\n"
@@ -483,7 +483,7 @@ async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_ques
     try:
         keyboard = get_cancel_keyboard_with_skip() if show_skip else get_cancel_keyboard()
         await context.bot.edit_message_text(
-            chat_id=user_id,  # Envoyer en privé à l'utilisateur
+            chat_id=chat_id,  # Dans le groupe
             message_id=message_id,
             text=status_text,
             reply_markup=keyboard,
@@ -498,30 +498,21 @@ async def annuler_ajout_handler(update: Update, context: ContextTypes.DEFAULT_TY
     if query:
         await query.answer()
         message_id = context.user_data.get('status_message_id')
-        user_id = context.user_data.get('status_user_id')  # Utiliser user_id au lieu de chat_id
+        chat_id = context.user_data.get('status_chat_id')  # Utiliser chat_id pour le groupe
         
-        # Supprimer le message de statut (en privé)
-        if message_id and user_id:
+        # Supprimer le message de statut
+        if message_id and chat_id:
             try:
-                await context.bot.delete_message(chat_id=user_id, message_id=message_id)
+                await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
             except Exception:
                 pass
         
         context.user_data.clear()
-        # Envoyer la confirmation en privé à l'utilisateur
-        try:
-            await context.bot.send_message(
-                chat_id=query.from_user.id,
-                text="❌ Toevoegen geannuleerd.",
-                reply_markup=get_menu_keyboard()
-            )
-        except Exception as e:
-            # Si on ne peut pas envoyer en privé, répondre dans le groupe
-            logger.warning(f"Impossible d'envoyer en privé: {e}")
-            await query.message.reply_text(
-                "❌ Toevoegen geannuleerd.",
-                reply_markup=get_menu_keyboard()
-            )
+        # Envoyer la confirmation dans le groupe
+        await query.message.reply_text(
+            "❌ Toevoegen geannuleerd.",
+            reply_markup=get_menu_keyboard()
+        )
 
 async def statut_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler pour changer le statut d'un retour"""
@@ -837,30 +828,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = "🔧 Afwerkingen beheer\n\n"
     message += "Kies een actie :"
     
-    # Vérifier si c'est une conversation privée ou un groupe
-    chat = update.effective_chat
-    if chat and chat.type == "private":
-        # Conversation privée : répondre directement
-        await update.message.reply_text(
-            message,
-            reply_markup=get_menu_keyboard()
-        )
-    else:
-        # Groupe : essayer d'envoyer en privé, sinon répondre dans le groupe
-        user_id = update.effective_user.id if update.effective_user else update.message.from_user.id
-        try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=message,
-                reply_markup=get_menu_keyboard()
-            )
-        except Exception as e:
-            # Si on ne peut pas envoyer en privé, répondre dans le groupe
-            logger.warning(f"Impossible d'envoyer en privé, réponse dans le groupe: {e}")
-            await update.message.reply_text(
-                message,
-                reply_markup=get_menu_keyboard()
-            )
+    # Toujours répondre dans le groupe/conversation actuelle
+    await update.message.reply_text(
+        message,
+        reply_markup=get_menu_keyboard()
+    )
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler principal pour les boutons"""
@@ -875,30 +847,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "ajouter_retour":
         # Créer un message éditable pour le formulaire
         context.user_data['retour'] = {}
-        # Envoyer le message de statut en privé à l'utilisateur
-        user_id = query.from_user.id
-        try:
-            status_msg = await context.bot.send_message(
-                chat_id=user_id,  # Envoyer en privé
-                text="📝 **Afwerking toevoegen**\n\n👤 Naam van klant : _In afwachting..._",
-                reply_markup=get_cancel_keyboard(),
-                parse_mode='Markdown'
-            )
-            context.user_data['status_message_id'] = status_msg.message_id
-            context.user_data['status_user_id'] = user_id  # Stocker user_id au lieu de chat_id
-            # Stocker aussi le chat_id du groupe pour publier le retour final
-            context.user_data['group_chat_id'] = query.message.chat_id
-            await query.edit_message_reply_markup(reply_markup=None)  # Retirer les boutons temporairement
-            await update_status_message(context, "👤 Naam van klant :")
-            return COLLECTING_NOM_CLIENT
-        except Exception as e:
-            # Si on ne peut pas envoyer en privé, informer l'utilisateur
-            logger.warning(f"Impossible d'envoyer en privé: {e}")
-            await query.answer(
-                "⚠️ Veuillez démarrer une conversation privée avec le bot pour utiliser cette fonctionnalité. Envoyez /start au bot en privé.",
-                show_alert=True
-            )
-            return ConversationHandler.END
+        # Envoyer le message de statut dans le groupe
+        chat_id = query.message.chat_id
+        status_msg = await query.message.reply_text(
+            "📝 **Afwerking toevoegen**\n\n👤 Naam van klant : _In afwachting..._",
+            reply_markup=get_cancel_keyboard(),
+            parse_mode='Markdown'
+        )
+        context.user_data['status_message_id'] = status_msg.message_id
+        context.user_data['status_chat_id'] = chat_id  # Stocker chat_id pour le groupe
+        await query.edit_message_reply_markup(reply_markup=None)  # Retirer les boutons temporairement
+        await update_status_message(context, "👤 Naam van klant :")
+        return COLLECTING_NOM_CLIENT
     
     elif data == "modifier_retour":
         message_id = query.message.message_id
@@ -1076,15 +1036,6 @@ async def collect_extra_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not check_authorization(update):
         return ConversationHandler.END
     
-    # Obtenir user_id pour les messages privés
-    user_id = update.effective_user.id if update.effective_user else None
-    if not user_id:
-        # Fallback si pas d'utilisateur
-        if update.message:
-            user_id = update.message.from_user.id
-        elif update.callback_query:
-            user_id = update.callback_query.from_user.id
-    
     # Vérifier si c'est un callback (bouton "Passer")
     if update.callback_query and update.callback_query.data == "passer_extra_info":
         extra_info = ""
@@ -1098,12 +1049,12 @@ async def collect_extra_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception:
             pass
     
-    # Supprimer le message de statut (en privé)
+    # Supprimer le message de statut
     message_id = context.user_data.get('status_message_id')
-    status_user_id = context.user_data.get('status_user_id')
-    if message_id and status_user_id:
+    chat_id = context.user_data.get('status_chat_id')
+    if message_id and chat_id:
         try:
-            await context.bot.delete_message(chat_id=status_user_id, message_id=message_id)
+            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
         except Exception:
             pass
     
@@ -1112,7 +1063,7 @@ async def collect_extra_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     try:
         # Obtenir le chat_id du groupe depuis context ou depuis le message/callback
-        group_chat_id = context.user_data.get('group_chat_id')
+        group_chat_id = context.user_data.get('status_chat_id')
         if not group_chat_id:
             if update.message:
                 group_chat_id = update.message.chat_id
@@ -1163,27 +1114,29 @@ async def collect_extra_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=get_retour_keyboard("en_attente")
         )
         
-        # Envoyer la confirmation en privé à l'utilisateur
-        try:
-            await context.bot.send_message(
-                chat_id=user_id,  # En privé
-                text="✅ Afwerking toegevoegd aan de groep.",
+        # Envoyer la confirmation dans le groupe
+        if update.message:
+            await update.message.reply_text(
+                "✅ Afwerking toegevoegd aan de groep.",
                 reply_markup=get_menu_keyboard()
             )
-        except Exception as e:
-            # Si on ne peut pas envoyer en privé, ne pas bloquer (le retour est déjà dans le groupe)
-            logger.warning(f"Impossible d'envoyer la confirmation en privé: {e}")
+        elif update.callback_query:
+            await update.callback_query.message.reply_text(
+                "✅ Afwerking toegevoegd aan de groep.",
+                reply_markup=get_menu_keyboard()
+            )
     except Exception as e:
         logger.error(f"Erreur envoi message: {e}")
-        try:
-            await context.bot.send_message(
-                chat_id=user_id,  # En privé
-                text="❌ Fout bij het toevoegen van de afwerking.",
+        if update.message:
+            await update.message.reply_text(
+                "❌ Fout bij het toevoegen van de afwerking.",
                 reply_markup=get_menu_keyboard()
             )
-        except Exception as e2:
-            # Si on ne peut pas envoyer en privé, ne pas bloquer
-            logger.warning(f"Impossible d'envoyer l'erreur en privé: {e2}")
+        elif update.callback_query:
+            await update.callback_query.message.reply_text(
+                "❌ Fout bij het toevoegen van de afwerking.",
+                reply_markup=get_menu_keyboard()
+            )
     
     context.user_data.clear()
     return ConversationHandler.END
@@ -1199,21 +1152,11 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
     chat_id = context.user_data.get('chat_id_editing')
     retour_data = context.user_data.get('retour_data', {})
     
-    user_id = update.effective_user.id if update.effective_user else update.message.from_user.id
-    
     if not message_id or not chat_id or not retour_data:
-        try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text="❌ Fout: bewerkingsgegevens niet gevonden.",
-                reply_markup=get_menu_keyboard()
-            )
-        except Exception as e:
-            logger.warning(f"Impossible d'envoyer en privé: {e}")
-            await update.message.reply_text(
-                "❌ Fout: bewerkingsgegevens niet gevonden.",
-                reply_markup=get_menu_keyboard()
-            )
+        await update.message.reply_text(
+            "❌ Fout: bewerkingsgegevens niet gevonden.",
+            reply_markup=get_menu_keyboard()
+        )
         context.user_data.clear()
         return ConversationHandler.END
     
@@ -1227,18 +1170,10 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     db_field = field_mapping.get(modif_type)
     if not db_field:
-        try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text="❌ Fout: ongeldig bewerkingstype.",
-                reply_markup=get_menu_keyboard()
-            )
-        except Exception as e:
-            logger.warning(f"Impossible d'envoyer en privé: {e}")
-            await update.message.reply_text(
-                "❌ Fout: ongeldig bewerkingstype.",
-                reply_markup=get_menu_keyboard()
-            )
+        await update.message.reply_text(
+            "❌ Fout: ongeldig bewerkingstype.",
+            reply_markup=get_menu_keyboard()
+        )
         context.user_data.clear()
         return ConversationHandler.END
     
@@ -1286,7 +1221,7 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=get_retour_keyboard(statut_actuel)
         )
         
-        # Confirmer à l'utilisateur en privé
+        # Confirmer à l'utilisateur dans le groupe
         field_names = {
             'nom': 'Naam',
             'adresse': 'Adres',
@@ -1294,34 +1229,16 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
             'materiel': 'Materiaal'
         }
         field_name = field_names.get(modif_type, 'Veld')
-        try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"✅ {field_name} bijgewerkt.",
-                reply_markup=get_menu_keyboard()
-            )
-        except Exception as e:
-            # Si on ne peut pas envoyer en privé, répondre dans le groupe
-            logger.warning(f"Impossible d'envoyer en privé: {e}")
-            await update.message.reply_text(
-                f"✅ {field_name} bijgewerkt.",
-                reply_markup=get_menu_keyboard()
-            )
+        await update.message.reply_text(
+            f"✅ {field_name} bijgewerkt.",
+            reply_markup=get_menu_keyboard()
+        )
     except Exception as e:
         logger.error(f"Erreur modification: {e}")
-        try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text="❌ Fout bij het bewerken.",
-                reply_markup=get_menu_keyboard()
-            )
-        except Exception as e2:
-            # Si on ne peut pas envoyer en privé, répondre dans le groupe
-            logger.warning(f"Impossible d'envoyer en privé: {e2}")
-            await update.message.reply_text(
-                "❌ Fout bij het bewerken.",
-                reply_markup=get_menu_keyboard()
-            )
+        await update.message.reply_text(
+            "❌ Fout bij het bewerken.",
+            reply_markup=get_menu_keyboard()
+        )
     
     context.user_data.clear()
     return ConversationHandler.END
@@ -1331,21 +1248,11 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not check_authorization(update):
         return ConversationHandler.END
     
-    user_id = update.effective_user.id if update.effective_user else update.message.from_user.id
     context.user_data.clear()
-    try:
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="❌ Operatie geannuleerd.",
-            reply_markup=get_menu_keyboard()
-        )
-    except Exception as e:
-        # Si on ne peut pas envoyer en privé, répondre dans le groupe
-        logger.warning(f"Impossible d'envoyer en privé: {e}")
-        await update.message.reply_text(
-            "❌ Operatie geannuleerd.",
-            reply_markup=get_menu_keyboard()
-        )
+    await update.message.reply_text(
+        "❌ Operatie geannuleerd.",
+        reply_markup=get_menu_keyboard()
+    )
     return ConversationHandler.END
 
 # ==================== MAIN ====================
