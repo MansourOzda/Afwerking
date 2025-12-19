@@ -225,6 +225,8 @@ def get_menu_keyboard() -> InlineKeyboardMarkup:
 def get_modifier_keyboard() -> InlineKeyboardMarkup:
     """Retourne le clavier pour modifier un retour"""
     keyboard = [
+        [InlineKeyboardButton("Naam bewerken", callback_data="modif_nom")],
+        [InlineKeyboardButton("Adres bewerken", callback_data="modif_adresse")],
         [InlineKeyboardButton("Beschrijving bewerken", callback_data="modif_description")],
         [InlineKeyboardButton("Materiaal bewerken", callback_data="modif_materiel")],
         [InlineKeyboardButton("❌ Annuleren", callback_data="annuler_modif")]
@@ -419,6 +421,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_confirmation_keyboard()
         )
         return SELECTING_ACTION
+    
+    elif data == "modif_nom":
+        context.user_data['modif_type'] = 'nom'
+        await query.edit_message_text("✏️ Nieuwe naam van klant :")
+        return MODIFYING_FIELD
+    
+    elif data == "modif_adresse":
+        context.user_data['modif_type'] = 'adresse'
+        await query.edit_message_text("✏️ Nieuw adres :")
+        return MODIFYING_FIELD
     
     elif data == "modif_description":
         context.user_data['modif_type'] = 'description'
@@ -617,7 +629,11 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
         materiel = retour_db[6]
     else:
         # Fallback sur les données locales si la BDD échoue
-        if modif_type == 'description':
+        if modif_type == 'nom':
+            retour_data['nom'] = new_value
+        elif modif_type == 'adresse':
+            retour_data['adresse'] = new_value
+        elif modif_type == 'description':
             retour_data['description'] = new_value
         elif modif_type == 'materiel':
             retour_data['materiel'] = new_value
@@ -639,7 +655,12 @@ async def handle_modification(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         
         # Confirmer à l'utilisateur
-        field_names = {'description': 'Beschrijving', 'materiel': 'Materiaal'}
+        field_names = {
+            'nom': 'Naam',
+            'adresse': 'Adres',
+            'description': 'Beschrijving',
+            'materiel': 'Materiaal'
+        }
         field_name = field_names.get(modif_type, 'Veld')
         await update.message.reply_text(f"✅ {field_name} bijgewerkt.", reply_markup=get_menu_keyboard())
     except Exception as e:
