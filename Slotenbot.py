@@ -328,11 +328,46 @@ def get_pagination_keyboard(page: int, total_pages: int, base_callback: str = "v
     
     return InlineKeyboardMarkup(keyboard)
 
+def get_liste_statut_keyboard(retours: List, page: int, total_pages: int, chat_id: int) -> InlineKeyboardMarkup:
+    """Retourne le clavier avec les boutons pour changer le statut de chaque retour"""
+    keyboard = []
+    
+    # Ajouter un bouton pour chaque retour de la page
+    for retour in retours:
+        message_id = retour[1]  # message_id est à l'index 1
+        nom = retour[3]  # nom_client est à l'index 3
+        statut = get_statut_from_retour(retour)
+        
+        # Texte du bouton : nom du client + emoji statut + action
+        status_emoji = "✅" if statut == "fait" else "⏳"
+        action_text = "→ In afwachting" if statut == "fait" else "→ Gedaan"
+        button_text = f"{status_emoji} {nom} {action_text}"
+        
+        # Callback data : changer_statut_select_<message_id>
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"changer_statut_select_{message_id}")])
+    
+    # Pagination si nécessaire
+    if total_pages > 1:
+        row = []
+        if page > 0:
+            row.append(InlineKeyboardButton("◀️ Vorige", callback_data=f"changer_statut_page_{page-1}"))
+        if page < total_pages - 1:
+            row.append(InlineKeyboardButton("Volgende ▶️", callback_data=f"changer_statut_page_{page+1}"))
+        if row:
+            keyboard.append(row)
+        
+        keyboard.append([InlineKeyboardButton(f"Pagina {page+1}/{total_pages}", callback_data="noop")])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Terug naar menu", callback_data="menu_principal")])
+    
+    return InlineKeyboardMarkup(keyboard)
+
 def get_menu_keyboard() -> InlineKeyboardMarkup:
     """Retourne le clavier du menu principal"""
     keyboard = [
         [InlineKeyboardButton("➕ Afwerking toevoegen", callback_data="ajouter_retour")],
-        [InlineKeyboardButton("📋 Zie afwerking", callback_data="voir_retours")]
+        [InlineKeyboardButton("📋 Zie afwerking", callback_data="voir_retours")],
+        [InlineKeyboardButton("🔄 Statut wijzigen", callback_data="changer_statut")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -486,6 +521,132 @@ async def voir_retours_page_handler(update: Update, context: ContextTypes.DEFAUL
             await voir_retours_handler(update, context, page)
         except (ValueError, IndexError):
             await query.answer("❌ Ongeldige pagina", show_alert=True)
+
+async def changer_statut_page_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler pour la pagination de la liste de changement de statut"""
+    query = update.callback_query
+    if query and query.data:
+        try:
+            page = int(query.data.split("_")[-1])
+            await changer_statut_handler(update, context, page)
+        except (ValueError, IndexError):
+            await query.answer("❌ Ongeldige pagina", show_alert=True)
+
+async def changer_statut_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0) -> None:
+    """Handler pour afficher la liste des retours avec possibilité de changer le statut"""
+    query = update.callback_query
+    await query.answer()
+    
+    if not check_authorization(update):
+        return
+    
+    # Récupérer les retours paginés du groupe actuel
+    chat_id = query.message.chat_id
+    retours, total, total_pages = get_retours_paginated(chat_id, page, per_page=10)
+    
+    if not retours:
+        message = "🔄 **Statut wijzigen**\n\n"
+        message += "Geen afwerkingen geregistreerd op dit moment."
+        try:
+            await query.edit_message_text(message, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Erreur édition message changer_statut: {e}")
+            await query.message.reply_text(message, reply_markup=get_menu_keyboard(), parse_mode='Markdown')
+        return
+    
+    # Formater la liste des retours de la page
+    message = "🔄 **Statut wijzigen**\n\n"
+    message += "Kies een afwerking om de status te wijzigen:\n\n"
+    
+    start_idx = page * 10 + 1
+    for idx, retour in enumerate(retours):
+        statut = get_statut_from_retour(retour)
+        status_emoji = "✅" if statut == "fait" else "⏳"
+        status_text = "Gedaan" if statut == "fait" else "In afwachting"
+        
+        global_idx = start_idx + idx
+        message += f"**{global_idx}. {retour[3]}** {status_emoji}\n"
+        message += f"📍 {retour[4]}\n"
+        message += f"Status: {status_text}\n\n"
+    
+    message += f"_Totaal: {total} afwerking(en) - Pagina {page+1}/{total_pages}_"
+    
+    # Clavier avec boutons pour changer le statut
+    statut_keyboard = get_liste_statut_keyboard(retours, page, total_pages, chat_id)
+    
+    try:
+        await query.edit_message_text(message, reply_markup=statut_keyboard, parse_mode='Markdown')
+    except Exception as e:
+        logger.error(f"Erreur édition message changer_statut: {e}")
+        await query.message.reply_text(message, reply_markup=statut_keyboard, parse_mode='Markdown')
+
+async def changer_statut_select_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler pour changer le statut d'un retour sélectionné depuis la liste"""
+    query = update.callback_query
+    if not query:
+        return
+    
+    await query.answer()
+    
+    # Extraire le message_id depuis le callback_data : changer_statut_select_<message_id>
+    try:
+        message_id = int(query.data.split("_")[-1])
+    except (ValueError, IndexError):
+        await query.answer("❌ Ongeldige selectie", show_alert=True)
+        return
+    
+    chat_id = query.message.chat_id
+    
+    # Récupérer le retour actuel
+    retour = get_retour_by_message_id(message_id, chat_id)
+    if not retour:
+        await query.answer("❌ Afwerking niet gevonden", show_alert=True)
+        return
+    
+    # Inverser le statut actuel
+    statut_actuel = get_statut_from_retour(retour)
+    nouveau_statut = "fait" if statut_actuel == "en_attente" else "en_attente"
+    
+    # Mettre à jour dans la base de données
+    update_statut_in_db(message_id, chat_id, nouveau_statut)
+    
+    # Récupérer le retour mis à jour
+    retour_updated = get_retour_by_message_id(message_id, chat_id)
+    if retour_updated:
+        statut_final = get_statut_from_retour(retour_updated)
+        date_creation = retour_updated[8] if len(retour_updated) > 8 else None
+        
+        # Mettre à jour le message dans le groupe
+        new_text = format_retour_message(
+            retour_updated[3],  # nom
+            retour_updated[4],  # adresse
+            retour_updated[5],  # description
+            retour_updated[6],  # materiel
+            statut_final,
+            date_creation
+        )
+        
+        try:
+            # Modifier le message dans le groupe
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=new_text,
+                reply_markup=get_retour_keyboard(statut_final)
+            )
+            
+            # Confirmer à l'utilisateur
+            status_text = "Gedaan" if statut_final == "fait" else "In afwachting"
+            await query.answer(f"✅ Status gewijzigd naar: {status_text}")
+            
+            # Retourner à la liste (raffraîchir)
+            await changer_statut_handler(update, context, 0)
+            
+        except Exception as e:
+            logger.error(f"Erreur mise à jour statut: {e}")
+            await query.answer("❌ Fout bij het bijwerken van de status", show_alert=True)
+    else:
+        await query.answer("❌ Afwerking niet gevonden", show_alert=True)
 
 async def voir_retours_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0) -> None:
     """Handler séparé pour le bouton 'Voir les retours' avec pagination"""
@@ -993,6 +1154,12 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(lambda u, c: voir_retours_handler(u, c, 0), pattern="^voir_retours$"))
     # Handler pour la pagination
     application.add_handler(CallbackQueryHandler(voir_retours_page_handler, pattern="^voir_retours_page_"))
+    # Handler séparé pour "changer_statut" (doit être avant le ConversationHandler)
+    application.add_handler(CallbackQueryHandler(lambda u, c: changer_statut_handler(u, c, 0), pattern="^changer_statut$"))
+    # Handler pour la pagination de changer_statut
+    application.add_handler(CallbackQueryHandler(changer_statut_page_handler, pattern="^changer_statut_page_"))
+    # Handler pour sélectionner un retour et changer son statut
+    application.add_handler(CallbackQueryHandler(changer_statut_select_handler, pattern="^changer_statut_select_"))
     application.add_handler(conv_handler)
     
     # Ajouter le handler d'erreurs global (doit être le dernier)
