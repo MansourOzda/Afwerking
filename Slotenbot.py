@@ -103,9 +103,16 @@ def add_retour_to_db(message_id: int, chat_id: int, nom: str, adresse: str, desc
 
 def update_retour_in_db(message_id: int, chat_id: int, field: str, value: str):
     """Met à jour un champ d'un retour dans la base de données (spécifique au groupe)"""
+    # Liste des champs autorisés pour éviter l'injection SQL
+    ALLOWED_FIELDS = {'description', 'materiel', 'nom_client', 'adresse', 'date'}
+    if field not in ALLOWED_FIELDS:
+        raise ValueError(f"Champ non autorisé: {field}. Champs autorisés: {', '.join(ALLOWED_FIELDS)}")
+    
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute(f'UPDATE retours SET {field} = ? WHERE message_id = ? AND chat_id = ?', (value, message_id, chat_id))
+    # Construire la requête de manière sécurisée avec validation du champ
+    query = f'UPDATE retours SET {field} = ? WHERE message_id = ? AND chat_id = ?'
+    cursor.execute(query, (value, message_id, chat_id))
     conn.commit()
     conn.close()
 
@@ -695,10 +702,27 @@ def main() -> None:
         allow_reentry=True
     )
     
+    # Handler d'erreurs global
+    async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Gère les erreurs non capturées"""
+        logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
+        
+        # Essayer d'envoyer un message d'erreur à l'utilisateur si possible
+        if isinstance(update, Update) and update.effective_message:
+            try:
+                error_message = "❌ Er is een fout opgetreden. Probeer het later opnieuw."
+                await update.effective_message.reply_text(error_message)
+            except Exception:
+                # Si on ne peut pas envoyer de message, on log juste l'erreur
+                pass
+    
     application.add_handler(CommandHandler("start", start))
     # Handler séparé pour "voir_retours" (doit être avant le ConversationHandler)
     application.add_handler(CallbackQueryHandler(voir_retours_handler, pattern="^voir_retours$"))
     application.add_handler(conv_handler)
+    
+    # Ajouter le handler d'erreurs global (doit être le dernier)
+    application.add_error_handler(error_handler)
     
     logger.info("Bot démarré")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
