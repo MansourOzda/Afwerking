@@ -315,6 +315,13 @@ def get_confirmation_keyboard() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
+def get_cancel_keyboard() -> InlineKeyboardMarkup:
+    """Retourne le clavier avec le bouton Annuler pendant la saisie"""
+    keyboard = [
+        [InlineKeyboardButton("❌ Annuleren", callback_data="annuler_ajout")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 # ==================== HANDLERS ====================
 
 async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_question: str):
@@ -355,10 +362,29 @@ async def update_status_message(context: ContextTypes.DEFAULT_TYPE, current_ques
             chat_id=chat_id,
             message_id=message_id,
             text=status_text,
+            reply_markup=get_cancel_keyboard(),
             parse_mode='Markdown'
         )
     except Exception as e:
         logger.error(f"Erreur mise à jour message statut: {e}")
+
+async def annuler_ajout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler pour annuler l'ajout d'un retour"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        message_id = context.user_data.get('status_message_id')
+        chat_id = context.user_data.get('status_chat_id')
+        
+        # Supprimer le message de statut
+        if message_id and chat_id:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception:
+                pass
+        
+        context.user_data.clear()
+        await query.message.reply_text("❌ Toevoegen geannuleerd.", reply_markup=get_menu_keyboard())
 
 async def menu_principal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler pour retourner au menu principal"""
@@ -459,11 +485,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data == "ajouter_retour":
         # Créer un message éditable pour le formulaire
+        context.user_data['retour'] = {}
+        # Le message sera créé par update_status_message avec le bouton annuler
         status_msg = await query.message.reply_text(
-            "📝 **Ajout d'un retour**\n\n👤 Nom du client : _En attente..._",
+            "📝 **Afwerking toevoegen**\n\n👤 Naam van klant : _In afwachting..._",
+            reply_markup=get_cancel_keyboard(),
             parse_mode='Markdown'
         )
-        context.user_data['retour'] = {}
         context.user_data['status_message_id'] = status_msg.message_id
         context.user_data['status_chat_id'] = status_msg.chat_id
         await query.edit_message_reply_markup(reply_markup=None)  # Retirer les boutons temporairement
@@ -558,7 +586,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ Verwijdering geannuleerd.", reply_markup=get_menu_keyboard())
         context.user_data.clear()
         return ConversationHandler.END
-    
     
     elif data == "statut_fait" or data == "statut_attente":
         # Changer le statut d'un retour
